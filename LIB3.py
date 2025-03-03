@@ -35,6 +35,7 @@ class Node:
                  LIFT=None,
                  LCR=None,
                  distribution=None,
+                 labels=None,
                  *,value=None):
         
         self.gpi = gpi
@@ -47,6 +48,7 @@ class Node:
         self.right = right
         self.value = value
         self.distribution = distribution
+        self.labels = labels
 
     def _is_leaf_node(self):
         return self.value is not None
@@ -125,7 +127,7 @@ class Tree:
 
             print("(criteria1)  Nodo foglia raggiunto. Valore di y associato a questo nodo:", leaf_value) #TODO da cancellare
             print("\n")
-            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution)
+            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, labels=len(y))
 
         # The best predictors are found (highest gpi)
         gpi, array_of_Fs = self._gpi(X, y, n_samples)
@@ -172,7 +174,7 @@ class Tree:
 
             print("(criteria2) Nodo foglia raggiunto. Valore di y associato a questo nodo:", leaf_value) #TODO da cancellare
             print("\n")
-            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution)
+            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, labels=len(y))
         
 
         print("best feature", best_feature)
@@ -196,7 +198,7 @@ class Tree:
             left = self._grow_tree(X.loc[indexL, X.columns != best_feature], y[indexL], depth+1, 2*pos)
             right = self._grow_tree(X.loc[indexR, X.columns != best_feature], y[indexR], depth+1, 2*pos+1)
 
-        return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], left=left, right=right, impurity=impurity, distribution=distribution)
+        return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], left=left, right=right, impurity=impurity, distribution=distribution, labels=len(y))
 
     def _split(self, X_col, best_treshold):
         L = np.unique(X_col)[np.array(best_treshold)[:] > 0]
@@ -390,7 +392,6 @@ class Tree:
         self._add_node(x_c+x_dist, y_c-y_dist, x_dist/2, y_dist, node.right, ax)
         return
 
-    
         if node._is_leaf_node():
             return {
                     "position": node.position,
@@ -416,7 +417,8 @@ class Tree:
                     "distribution" : ', '.join(str(round(x, 3)) for x in node.distribution),
                     "position": node.position,
                     "value": str(node.value),
-                    "impurity": node.impurity
+                    "impurity": node.impurity,
+                    "labels": node.labels,
                     }
         
         return {
@@ -428,6 +430,7 @@ class Tree:
             "gpi" : node.gpi,
             "ppi" : node.ppi,
             "impurity": node.impurity,
+            "labels": node.labels,
             "children": [
                 self._recurse(node.left),
                 self._recurse(node.right),
@@ -525,9 +528,9 @@ class Tree:
                     tooltip = document.getElementById('tooltip')
 
                     if(node.isLeaf == 1){{
-                        tooltip.innerText = "Id: " + node.position + "\\nClass distribution: [" + node.distribution + "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nValue: "+ node.value;
+                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution + "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nValue: "+ node.value;
                     }} else {{
-                        tooltip.innerText = "Id: " + node.position + "\\nClass distribution: [" + node.distribution + "]\\nFeature: " + node.feature + "\\nThreshold left: [" + node.treshold + "]\\nGpi: " + node.gpi.toFixed(3) + "\\nPpi: " + node.ppi.toFixed(3)  + "\\nImpurty: " + node.impurity.toFixed(3);
+                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels +  "\\nClass distribution: [" + node.distribution + "]\\nFeature: " + node.feature + "\\nThreshold left: [" + node.treshold + "]\\nGpi: " + node.gpi.toFixed(3) + "\\nPpi: " + node.ppi.toFixed(3)  + "\\nImpurty: " + node.impurity.toFixed(3);
                     }}
 
                     if(left > 50){{
