@@ -60,10 +60,9 @@ class Tree:
                  min_impurity=0.1,
                  compound_feats=False, 
                  impurity_method="gini", 
-                 min_samples_split=2, 
+                 min_samples_split=1, 
                  max_depth=100,
                  feats_viewed=1, 
-                 n_features=None, 
                  model="twoStage",
                  FAST=False):
         
@@ -76,7 +75,6 @@ class Tree:
 
         self.min_samples_split = min_samples_split
         self.max_depth = max_depth
-        self.n_features = n_features
         self.feats_viewed = feats_viewed
         self.impurity_method = impurity_method
         self.min_gpi = min_gpi
@@ -94,9 +92,6 @@ class Tree:
         self.root=None
 
     def fit(self, X, y):
-        #The number of features is evaluated
-        self.n_features = X.shape[1] if not self.n_features else min(X.shape[1], self.n_features)
-        
         if(self.impurity_method!="entropy" and self.impurity_method!="gini" and self.impurity_method!="error"):
             print("ERROR. An impurity method that is not gini, error or entropy has been given.\nA gini impurity method has been automatichally given")
             self.impurity_method = "gini"
@@ -566,5 +561,5 @@ class Tree:
 
         with open(output_file, "w", encoding="utf-8") as f:
               f.write(html_content)
-
+  
 
