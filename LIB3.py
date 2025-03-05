@@ -32,9 +32,11 @@ class Node:
                  beta=None,
                  left=None, 
                  right=None,
-                 LIFT=None,
+                 LIFT_1=None,
+                 LIFT_2=None,
                  LCR=None,
                  distribution=None,
+                 N=None,
                  labels=None,
                  *,value=None):
         
@@ -48,7 +50,10 @@ class Node:
         self.right = right
         self.value = value
         self.distribution = distribution
+        self.N = N
         self.labels = labels
+        self.LIFT_1 = LIFT_1
+        self.LIFT_2 = LIFT_2
 
     def _is_leaf_node(self):
         return self.value is not None
@@ -67,7 +72,7 @@ class Tree:
                  FAST=False):
         
         col_config = {
-            "lba": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Alpha', 'Beta', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
+            "lba": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Alpha', 'Beta', 'LIFT_K1', 'LIFT_K2', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
             "twoStage": ['id', 'Node Type', 'Value','Splitting Variable', 'n', 'Class Distribution', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
             "twoing": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
         }
@@ -118,11 +123,11 @@ class Tree:
         if(depth>=self.max_depth or n_labels==1 or n_samples<self.min_samples_split or n_feats==0 or impurity<self.min_impurity):
             leaf_value = y.mode()[0]
             self._update_plot(depth, pos)
-            self._update_results(pos, "Leaf Node", leaf_value, None, len(y), distribution , None, None, None, impurity, None, None)
+            self._update_results(pos, "Leaf Node", leaf_value, None, len(y), distribution , None, None, None, impurity, None, None, None, None)
 
             print("(criteria1)  Nodo foglia raggiunto. Valore di y associato a questo nodo:", leaf_value) #TODO da cancellare
             print("\n")
-            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, labels=len(y))
+            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, N=len(y), labels=np.unique(y))
 
         # The best predictors are found (highest gpi)
         gpi, array_of_Fs = self._gpi(X, y, n_samples)
@@ -158,20 +163,16 @@ class Tree:
         # Amongst the best predictors the one with the highest improvement (highest ppi) is chosen to perform the split
         best_feature, best_treshold, best_ppi, best_idx, alpha, beta = self._find_best_predictor(X, n_labels, array_of_Fs, gpi_index, gpi)
 
-        print("gpi", gpi[best_idx])
-        print("best ppi", best_ppi)
-
         # Check the stopping criteria
         if(gpi[best_idx]<self.min_gpi or best_ppi<self.min_ppi or best_ppi == 0):
             leaf_value = y.mode()[0]
             self._update_plot(depth, pos)
-            self._update_results(pos, "Leaf Node", leaf_value, None, len(y), distribution, None, None, None, impurity, None, None)
+            self._update_results(pos, "Leaf Node", leaf_value, None, len(y), distribution, None, None, None, impurity, None, None, None, None)
 
             print("(criteria2) Nodo foglia raggiunto. Valore di y associato a questo nodo:", leaf_value) #TODO da cancellare
             print("\n")
-            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, labels=len(y))
+            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, N=len(y), labels=np.unique(y))
         
-
         print("best feature", best_feature)
         print("gpi", gpi[best_idx])
         print("best ppi", best_ppi)
@@ -182,7 +183,7 @@ class Tree:
         indexL, indexR = self._split(X[best_feature], best_treshold)
         
         # Create the child nodes
-        self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, best_treshold, gpi[best_idx], best_ppi, impurity, alpha, beta)
+        self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, best_treshold, gpi[best_idx], best_ppi, impurity, alpha, beta, [x[0] for x in beta]/distribution, [x[1] for x in beta]/distribution)
         if(best_feature == compound_feature):
             X = X.loc[:, X.columns != feature_1]
             X = X.loc[:, X.columns != feature_2]
@@ -193,7 +194,11 @@ class Tree:
             left = self._grow_tree(X.loc[indexL, X.columns != best_feature], y[indexL], depth+1, 2*pos)
             right = self._grow_tree(X.loc[indexR, X.columns != best_feature], y[indexR], depth+1, 2*pos+1)
 
-        return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], left=left, right=right, impurity=impurity, distribution=distribution, labels=len(y))
+        return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, 
+                    treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], 
+                    left=left, right=right, impurity=impurity, distribution=distribution, 
+                    N=len(y), labels=np.unique(y),
+                    LIFT_1=[x[0] for x in beta]/distribution, LIFT_2=[x[1] for x in beta]/distribution)
 
     def _split(self, X_col, best_treshold):
         L = np.unique(X_col)[np.array(best_treshold)[:] > 0]
@@ -324,9 +329,9 @@ class Tree:
         if(self.r_c is None or r_c>self.r_c):
             self.r_c = r_c
     
-    def _update_results(self, id, type, value, feature, n, distribution, treshold, gpi, ppi, impurity, a, b):
+    def _update_results(self, id, type, value, feature, n, distribution, treshold, gpi, ppi, impurity, a, b, lift1, lift2):
         if(self.model_name == "lba"):
-            self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, a, b, treshold, impurity, gpi, ppi]
+            self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, a, b, lift1, lift2, treshold, impurity, gpi, ppi]
         else:
             self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, treshold, impurity, gpi, ppi]
 
@@ -405,27 +410,48 @@ class Tree:
             ]
         }
 
+    def _custom_round(self, value, decimals=2):
+        if abs(value) >= 0.01:
+            return round(value, decimals)
+        
+        i = 3
+        while i>0:
+            treshold = pow(10, -1*i)
+            if value >= treshold:
+                return round(value, i)
+            i +=1 
+
     def _recurse(self, node):
+        dist = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.distribution.tolist()))
         if node._is_leaf_node():
             return {
                     "isLeaf": 1,
-                    "distribution" : ', '.join(str(round(x, 3)) for x in node.distribution),
+                    "distribution" : dist,
                     "position": node.position,
                     "value": str(node.value),
                     "impurity": node.impurity,
-                    "labels": node.labels,
+                    "labels": node.N,
                     }
         
+        if(self.model_name == "lba"):
+            lift1 = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.LIFT_1.tolist()))
+            lift2 = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.LIFT_2.tolist()))
+        else:
+            lift1 = None
+            lift2 = None
+
         return {
             "isLeaf": 0,
             "feature": node.feature,
-            "distribution" : ', '.join(str(round(x, 2)) for x in node.distribution),
+            "distribution" : dist,
+            "lift1" : lift1,
+            "lift2" : lift2,
             "treshold" : ', '.join(str(x) for x in node.treshold),
             "position": node.position,
             "gpi" : node.gpi,
             "ppi" : node.ppi,
             "impurity": node.impurity,
-            "labels": node.labels,
+            "labels": node.N,
             "children": [
                 self._recurse(node.left),
                 self._recurse(node.right),
@@ -523,9 +549,13 @@ class Tree:
                     tooltip = document.getElementById('tooltip')
 
                     if(node.isLeaf == 1){{
-                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution + "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nValue: "+ node.value;
+                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution +  "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nValue: "+ node.value;
                     }} else {{
-                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels +  "\\nClass distribution: [" + node.distribution + "]\\nFeature: " + node.feature + "\\nThreshold left: [" + node.treshold + "]\\nGpi: " + node.gpi.toFixed(3) + "\\nPpi: " + node.ppi.toFixed(3)  + "\\nImpurty: " + node.impurity.toFixed(3);
+                        if(node.lift1 && node.lift2) {{
+                            tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels +  "\\nClass distribution: [" + node.distribution + "]\\nLIFT left: [" + node.lift1 + "]\\nLIFT right: [" + node.lift2 + "]\\nFeature: " + node.feature + "\\nThreshold left: [" + node.treshold + "]\\nGpi: " + node.gpi.toFixed(3) + "\\nPpi: " + node.ppi.toFixed(3)  + "\\nImpurty: " + node.impurity.toFixed(3);
+                        }} else {{
+                            tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels +  "\\nClass distribution: [" + node.distribution + "]\\nFeature: " + node.feature + "\\nThreshold left: [" + node.treshold + "]\\nGpi: " + node.gpi.toFixed(3) + "\\nPpi: " + node.ppi.toFixed(3)  + "\\nImpurty: " + node.impurity.toFixed(3);
+                        }}
                     }}
 
                     if(left > 50){{
