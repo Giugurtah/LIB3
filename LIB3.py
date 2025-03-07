@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import math
 import json 
+import bisect
 import matplotlib.pyplot as plt
 #from matplotlib.patches import Rectangle, Circle, Polygon
 from pathlib import Path
@@ -19,6 +20,8 @@ C_SCRIPT = ct.CDLL(str(Path(__file__).parent.absolute()) + '/LIB3C.so')
 
 gpi_c = getattr(C_SCRIPT,'gpi_c')
 gpi_c.restype = FLO
+extract = getattr(C_SCRIPT,'extract')
+extract.restype = INT
 
 class Node:
     def __init__(self, 
@@ -104,6 +107,17 @@ class Tree:
         #The recursive function is called
         self.root = self._grow_tree(X, y)
 
+    def predict(self, X):
+                arr = []
+                count = 1
+                for i in range(len(X)):
+                    print("Riga ispezionata:", count)
+                    arr.append(self._traverse_tree(X.iloc[i], self.root))
+                    count = count+1
+                
+                return np.array(arr)
+
+    #Growing functions
     def _grow_tree(self, X, y, depth=0, pos=1):
         print("INIZIO CALCOLO NODO ALLA PROFONDITA':", depth, " ID:", pos) #TODO da cancellare
         # All columns with constant values are dropped
@@ -270,38 +284,8 @@ class Tree:
                 return best_feature, best_treshold, best_ppi, best_idx, best_alpha, best_beta
 
         return best_feature, best_treshold, best_ppi, best_idx, best_alpha, best_beta
-
-    def _gpi(self, X, y, N): 
-        gpi = []
-        arr = []
-        for x in X:
-            F = pd.crosstab(X.loc[:, x], y, margins=False)
-            I = len(F)
-            J = len(F.iloc[0])
-
-            FLOARR = FLO * J
-            PFLOARR = PFLO * I
-            
-            ptr_rc = PFLOARR()
-            # Array of pointers initialization
-            for i in range(I):
-                ptr_rc[i] = FLOARR()
-                for j in range(J):
-                    ptr_rc[i][j] = F.iloc[i].iloc[j]/N
-            arr.append(ptr_rc)
-            gpi.append(gpi_c(I, J, ptr_rc))
-        return gpi, arr
     
-    def predict(self, X):
-        arr = []
-        count = 1
-        for i in range(len(X)):
-            print("Riga ispezionata:", count)
-            arr.append(self._traverse_tree(X.iloc[i], self.root))
-            count = count+1
-        
-        return np.array(arr)
-    
+    #Update functions   
     def _traverse_tree(self, x, node):
         if node._is_leaf_node():
             print("Giunto alla foglia. Valore=", node.value)
@@ -335,6 +319,28 @@ class Tree:
         else:
             self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, treshold, impurity, gpi, ppi]
 
+    #Metrics functions
+    def _gpi(self, X, y, N): 
+            gpi = []
+            arr = []
+            for x in X:
+                F = pd.crosstab(X.loc[:, x], y, margins=False)
+                I = len(F)
+                J = len(F.iloc[0])
+
+                FLOARR = FLO * J
+                PFLOARR = PFLO * I
+                
+                ptr_rc = PFLOARR()
+                # Array of pointers initialization
+                for i in range(I):
+                    ptr_rc[i] = FLOARR()
+                    for j in range(J):
+                        ptr_rc[i][j] = F.iloc[i].iloc[j]/N
+                arr.append(ptr_rc)
+                gpi.append(gpi_c(I, J, ptr_rc))
+            return gpi, arr
+
     def _impurity(self, y):
         impurity = 0
         dist = np.unique(y, return_counts=True)[1]/len(y)
@@ -351,8 +357,7 @@ class Tree:
             impurity = max(dist)
         return impurity
 
-#Following the functions used to plot the graph using matplotlib or html+js
-
+    #Plotting functions
     def plot(self):
         rate = (1)/(self.l_c + self.r_c)
         x_center = rate*self.l_c
@@ -383,32 +388,14 @@ class Tree:
     def _add_node(self, x_c, y_c, x_dist, y_dist, node, ax):
         if node._is_leaf_node():
             scatter = plt.scatter(x_c, y_c, edgecolor='blue', facecolor='lightblue', marker='s', zorder=2, s=100,  picker=True)
-
             return
+        
         plt.plot([x_c,x_c-x_dist],[y_c,y_c-y_dist],[x_c,x_c+x_dist],[y_c,y_c-y_dist], color="blue")
         scatter = plt.scatter(x_c, y_c, edgecolor='blue', facecolor='lightblue', zorder=2, s=100,  picker=True)
 
         self._add_node(x_c-x_dist, y_c-y_dist, x_dist/2, y_dist, node.left, ax)
         self._add_node(x_c+x_dist, y_c-y_dist, x_dist/2, y_dist, node.right, ax)
         return
-
-        if node._is_leaf_node():
-            return {
-                    "position": node.position,
-                    "value": node.value
-                    }
-        
-        return {
-            "feature": node.feature,
-            "treshold" : node.treshold,
-            "position": node.position,
-            "gpi" : node.gpi,
-            "ppi" : node.ppi,
-            "children": [
-                self._recurse(node.left),
-                self._recurse(node.right),
-            ]
-        }
 
     def _custom_round(self, value, decimals=2):
         if abs(value) >= 0.01:
@@ -592,4 +579,78 @@ class Tree:
         with open(output_file, "w", encoding="utf-8") as f:
               f.write(html_content)
   
+class Categorizer:
+    def __init__(self, min_classes=1, max_classes=10, min_impurity=0.3, impurity_method="gini"):
+        self.min_classes = min_classes
+        self.max_classes = max_classes
+        self.min_impurity = min_impurity
+        self.impurity_method = impurity_method
 
+    def categorize(self, x, y):
+        x_sort, y_sort = zip(*sorted(zip(x, y), reverse=False))
+
+        y_encoded, classi_uniche = pd.factorize(y_sort)
+        mod_y = np.bincount(y_encoded)  
+
+        MODY = INT * len(mod_y)
+        mod_y_c = MODY()
+
+        YENC = INT * len(y_encoded)
+        y_enc_c = YENC()
+        # Array of pointers initialization
+        for k in range(len(y_encoded)):
+            y_enc_c[k] = y_encoded[k]
+
+        #Arrays
+        splits = [0, len(y_encoded)]
+        #Param
+        n_classes = 1
+        highest_i = 1
+        while(n_classes < self.min_classes or (highest_impurity > self.min_impurity and n_classes < self.max_classes)):
+            print("ITERAZIONE NUMERO: ", n_classes)
+            mod_y = np.bincount(y_encoded[splits[highest_i-1]:splits[highest_i]], minlength=len(mod_y)) 
+            for k in range(len(mod_y)):
+                mod_y_c[k] = mod_y[k]
+            
+            print("Start:", splits[highest_i-1], "Stop:", splits[highest_i])
+            split = extract(len(y_encoded), len(mod_y), y_enc_c, mod_y_c, splits[highest_i-1], splits[highest_i])   
+            
+            bisect.insort(splits, split)
+            n_classes += 1
+
+            print("Split: ", split, "splits: ", splits)
+            highest_impurity = 0
+            highest_i = 0
+            for i in range(1, len(splits)):
+                current_impurity = self._impurity(y_encoded[splits[i-1]:splits[i]]) 
+                if current_impurity > highest_impurity:
+                    highest_i = i
+                    highest_impurity = current_impurity
+
+        #Categorization of x
+        labels = np.arange(len(splits)-1)
+        treshold = np.zeros(len(splits))
+        treshold[0] = x_sort[0]
+        treshold[len(treshold)-1] = x_sort[len(x)-1]
+        for i in range(1, len(splits) - 1):
+            treshold[i] = (x_sort[splits[i]] + x_sort[splits[i-1]])/2
+
+        print(treshold)
+        x_cat = pd.cut(x, bins=treshold, labels=labels, right=False)
+        return x_cat
+    
+    def _impurity(self, y):
+        impurity = 0
+        dist = np.unique(y, return_counts=True)[1]/len(y)
+        if self.impurity_method == "gini":
+            impurity = 1
+            for x in dist:
+                impurity -= x*x
+            return impurity
+        elif self.impurity_method == "entropy":
+            for x in dist:
+                impurity -= x*math.log10(x)
+            return impurity
+        else:
+            impurity = max(dist)
+        return impurity
