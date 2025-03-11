@@ -628,15 +628,15 @@ class Categorizer:
                     highest_impurity = current_impurity
 
         #Categorization of x
-        labels = np.arange(len(splits)-1)
-        treshold = np.zeros(len(splits))
-        treshold[0] = x_sort[0]
-        treshold[len(treshold)-1] = x_sort[len(x)-1]
+        treshold = []
+        treshold.append(x_sort[0])
         for i in range(1, len(splits) - 1):
-            treshold[i] = (x_sort[splits[i]] + x_sort[splits[i-1]])/2
+            treshold.append((x_sort[splits[i]] + x_sort[splits[i-1]])/2)
+        treshold.append(x_sort[len(x)-1])
 
+        labels = np.arange(len(np.unique(treshold))-1)
         print(treshold)
-        x_cat = pd.cut(x, bins=treshold, labels=labels, right=False)
+        x_cat = pd.cut(x, bins=treshold, labels=labels, include_lowest=True, right=True, duplicates='drop')
         return x_cat
     
     def _impurity(self, y):
