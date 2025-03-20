@@ -31,13 +31,11 @@ class Node:
                  impurity=None,
                  feature=None, 
                  treshold=None, 
-                 alpha=None,
-                 beta=None,
                  left=None, 
                  right=None,
                  LIFT_1=None,
                  LIFT_2=None,
-                 LCR=None,
+                 GCR=None,
                  distribution=None,
                  N=None,
                  labels=None,
@@ -57,6 +55,7 @@ class Node:
         self.labels = labels
         self.LIFT_1 = LIFT_1
         self.LIFT_2 = LIFT_2
+        self.GCR = GCR
 
     def _is_leaf_node(self):
         return self.value is not None
@@ -75,11 +74,12 @@ class Tree:
                  FAST=False):
         
         col_config = {
-            "lba": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Alpha', 'Beta', 'LIFT_K1', 'LIFT_K2', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
+            "lba": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Alpha', 'Beta', 'LIFT_K1', 'LIFT_K2', 'GCR', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
             "twoStage": ['id', 'Node Type', 'Value','Splitting Variable', 'n', 'Class Distribution', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
             "twoing": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
         }
         col = col_config.get(model, ['id']) 
+
 
         self.min_samples_split = min_samples_split
         self.max_depth = max_depth
@@ -94,6 +94,7 @@ class Tree:
         self.FAST = FAST
 
         self.results = pd.DataFrame(columns=col)
+        self.targhet_dist = None
         self.depth = None
         self.l_c = None
         self.r_c = None
@@ -103,9 +104,12 @@ class Tree:
         if(self.impurity_method!="entropy" and self.impurity_method!="gini" and self.impurity_method!="error"):
             print("ERROR. An impurity method that is not gini, error or entropy has been given.\nA gini impurity method has been automatichally given")
             self.impurity_method = "gini"
-        
+
+        self.targhet_dist = [np.unique(y), np.unique(y, return_counts=True)[1]/len(y)]
         #The recursive function is called
         self.root = self._grow_tree(X, y)
+        print("Inizio pruning")
+        self._pruning(self.root)
 
     def predict(self, X):
                 arr = []
@@ -124,7 +128,8 @@ class Tree:
         nunique = X.nunique()
         col_to_drop = nunique[nunique == 1].index
         X = X.drop(col_to_drop, axis=1)
-        compound_feature = ""
+
+        compound_feature = "" #Compound feature used only if compound=TRUE
 
         # Generale sizes of X and y
         n_samples, n_feats = X.shape
@@ -136,12 +141,13 @@ class Tree:
         # Check the stopping criteria
         if(depth>=self.max_depth or n_labels==1 or n_samples<self.min_samples_split or n_feats==0 or impurity<self.min_impurity):
             leaf_value = y.mode()[0]
+            gcr = self._get_gcr(distribution, np.unique(y))
             self._update_plot(depth, pos)
-            self._update_results(pos, "Leaf Node", leaf_value, None, len(y), distribution , None, None, None, impurity, None, None, None, None)
+            self._update_results(pos, "Leaf Node", leaf_value, None, len(y), distribution , None, None, None, impurity, None, None, None, None, gcr)
 
             print("(criteria1)  Nodo foglia raggiunto. Valore di y associato a questo nodo:", leaf_value) #TODO da cancellare
             print("\n")
-            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, N=len(y), labels=np.unique(y))
+            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, N=len(y), labels=np.unique(y), GCR=gcr)
 
         # The best predictors are found (highest gpi)
         gpi, array_of_Fs = self._gpi(X, y, n_samples)
@@ -180,12 +186,13 @@ class Tree:
         # Check the stopping criteria
         if(gpi[best_idx]<self.min_gpi or best_ppi<self.min_ppi or best_ppi == 0):
             leaf_value = y.mode()[0]
+            gcr = self._get_gcr(distribution, np.unique(y))
             self._update_plot(depth, pos)
-            self._update_results(pos, "Leaf Node", leaf_value, None, len(y), distribution, None, None, None, impurity, None, None, None, None)
+            self._update_results(pos, "Leaf Node", leaf_value, None, len(y), distribution, None, None, None, impurity, None, None, None, None, gcr=gcr)
 
             print("(criteria2) Nodo foglia raggiunto. Valore di y associato a questo nodo:", leaf_value) #TODO da cancellare
             print("\n")
-            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, N=len(y), labels=np.unique(y))
+            return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, N=len(y), labels=np.unique(y), GCR=gcr)
         
         print("best feature", best_feature)
         print("gpi", gpi[best_idx])
@@ -197,7 +204,7 @@ class Tree:
         indexL, indexR = self._split(X[best_feature], best_treshold)
         
         # Create the child nodes
-        self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, best_treshold, gpi[best_idx], best_ppi, impurity, alpha, beta, [x[0] for x in beta]/distribution, [x[1] for x in beta]/distribution)
+        self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, best_treshold, gpi[best_idx], best_ppi, impurity, alpha, beta, [x[0] for x in beta]/distribution, [x[1] for x in beta]/distribution, [0 for _ in range(len(distribution))])
         if(best_feature == compound_feature):
             X = X.loc[:, X.columns != feature_1]
             X = X.loc[:, X.columns != feature_2]
@@ -212,7 +219,7 @@ class Tree:
                     treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], 
                     left=left, right=right, impurity=impurity, distribution=distribution, 
                     N=len(y), labels=np.unique(y),
-                    LIFT_1=[x[0] for x in beta]/distribution, LIFT_2=[x[1] for x in beta]/distribution)
+                    LIFT_1=[x[0] for x in beta]/distribution, LIFT_2=[x[1] for x in beta]/distribution, GCR=None)
 
     def _split(self, X_col, best_treshold):
         L = np.unique(X_col)[np.array(best_treshold)[:] > 0]
@@ -285,7 +292,56 @@ class Tree:
 
         return best_feature, best_treshold, best_ppi, best_idx, best_alpha, best_beta
     
-    #Update functions   
+    def _pruning(self, node):
+        if node is None or node.value is not None:
+            return node
+        
+        # Applica il pruning ai sotto-alberi
+        node.left = self._pruning(node.left)
+        node.right = self._pruning(node.right)
+
+        if node.left and node.right and node.left.value is not None and node.right.value is not None:
+            if node.left.value == node.right.value:
+                print("Esecuzione pruning sul nodo:", node.position)
+                node.gpi = None
+                node.ppi = None
+                node.feature = None
+                node.treshold = None
+                node.LIFT_1 = None
+                node.LIFT_2 = None
+                node.GCR = self._get_gcr(node.distribution, node.labels)
+                node.value = node.left.value
+
+                self.results.loc[self.results["id"] == node.position,"Node Type"] = "Leaf Node"
+                self.results.loc[self.results["id"] == node.position,"Value"] = node.value
+                self.results.loc[self.results["id"] == node.position,"Splitting Variable"] = None
+                self.results.loc[self.results["id"] == node.position,"Alpha"] = None
+                self.results.loc[self.results["id"] == node.position,"Beta"] = None
+                self.results.loc[self.results["id"] == node.position,"LIFT_K1"] = None
+                self.results.loc[self.results["id"] == node.position,"LIFT_K2"] = None
+                self.results.loc[self.results["id"] == node.position,"Treshold"] = None
+                self.results.loc[self.results["id"] == node.position,"Gpi"] = None
+                self.results.loc[self.results["id"] == node.position,"Ppi"] = None
+
+                self.results.at[self.results.index[self.results["id"] == node.position][0], "GCR"] = node.GCR
+
+                self.results = self.results[self.results["id"] != node.left.position]
+                self.results = self.results[self.results["id"] != node.right.position]
+
+                node.left = None
+                node.right = None
+
+        return node
+
+    #Update functions  
+    def _get_gcr(self, distribution, labels):
+        gcr = [0 for _ in range(len(labels))]
+        for i in range(len(labels)):
+            for j in range(len(self.targhet_dist[0])):
+                if(self.targhet_dist[0][j] == labels[i]):
+                    gcr[i] = float(distribution[i]/self.targhet_dist[1][j])
+        return gcr
+
     def _traverse_tree(self, x, node):
         if node._is_leaf_node():
             print("Giunto alla foglia. Valore=", node.value)
@@ -313,9 +369,9 @@ class Tree:
         if(self.r_c is None or r_c>self.r_c):
             self.r_c = r_c
     
-    def _update_results(self, id, type, value, feature, n, distribution, treshold, gpi, ppi, impurity, a, b, lift1, lift2):
+    def _update_results(self, id, type, value, feature, n, distribution, treshold, gpi, ppi, impurity, a, b, lift1, lift2, gcr):
         if(self.model_name == "lba"):
-            self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, a, b, lift1, lift2, treshold, impurity, gpi, ppi]
+            self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, a, b, lift1, lift2, gcr, treshold, impurity, gpi, ppi]
         else:
             self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, treshold, impurity, gpi, ppi]
 
@@ -409,8 +465,13 @@ class Tree:
             i +=1 
 
     def _recurse(self, node):
+        print(node.position)
         dist = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.distribution.tolist()))
-        if node._is_leaf_node():
+        if node.value is not None:
+            if(self.model_name == "lba"):
+                gcr = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.GCR))
+            else:
+                gcr = None
             return {
                     "isLeaf": 1,
                     "distribution" : dist,
@@ -418,6 +479,7 @@ class Tree:
                     "value": str(node.value),
                     "impurity": node.impurity,
                     "labels": node.N,
+                    "gcr" : gcr,
                     }
         
         if(self.model_name == "lba"):
@@ -536,7 +598,7 @@ class Tree:
                     tooltip = document.getElementById('tooltip')
 
                     if(node.isLeaf == 1){{
-                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution +  "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nValue: "+ node.value;
+                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution +  "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nGCR: [" + node.gcr  + "]\\nValue: "+ node.value;
                     }} else {{
                         if(node.lift1 && node.lift2) {{
                             tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels +  "\\nClass distribution: [" + node.distribution + "]\\nLIFT left: [" + node.lift1 + "]\\nLIFT right: [" + node.lift2 + "]\\nFeature: " + node.feature + "\\nThreshold left: [" + node.treshold + "]\\nGpi: " + node.gpi.toFixed(3) + "\\nPpi: " + node.ppi.toFixed(3)  + "\\nImpurty: " + node.impurity.toFixed(3);
@@ -580,77 +642,85 @@ class Tree:
               f.write(html_content)
   
 class Categorizer:
-    def __init__(self, min_classes=1, max_classes=10, min_impurity=0.3, impurity_method="gini"):
+    def __init__(self, min_classes=1, max_classes=10, min_variance=0.3, min_clustersize=1, model="kmeans", k=None, k_method="elbow", sequential=False):
         self.min_classes = min_classes
         self.max_classes = max_classes
-        self.min_impurity = min_impurity
-        self.impurity_method = impurity_method
+        self.min_variance = min_variance
+        self.min_clustersize = min_clustersize
+        self.k = k
+        self.k_method = k_method
+        self.sequential = sequential
 
-    def categorize(self, x, y):
-        x_sort, y_sort = zip(*sorted(zip(x, y), reverse=False))
-
-        y_encoded, classi_uniche = pd.factorize(y_sort)
-        mod_y = np.bincount(y_encoded)  
-
-        MODY = INT * len(mod_y)
-        mod_y_c = MODY()
-
-        YENC = INT * len(y_encoded)
-        y_enc_c = YENC()
-        # Array of pointers initialization
-        for k in range(len(y_encoded)):
-            y_enc_c[k] = y_encoded[k]
-
-        #Arrays
-        splits = [0, len(y_encoded)]
-        #Param
-        n_classes = 1
-        highest_i = 1
-        while(n_classes < self.min_classes or (highest_impurity > self.min_impurity and n_classes < self.max_classes)):
-            print("ITERAZIONE NUMERO: ", n_classes)
-            mod_y = np.bincount(y_encoded[splits[highest_i-1]:splits[highest_i]], minlength=len(mod_y)) 
-            for k in range(len(mod_y)):
-                mod_y_c[k] = mod_y[k]
-            
-            print("Start:", splits[highest_i-1], "Stop:", splits[highest_i])
-            split = extract(len(y_encoded), len(mod_y), y_enc_c, mod_y_c, splits[highest_i-1], splits[highest_i])   
-            
-            bisect.insort(splits, split)
-            n_classes += 1
-
-            print("Split: ", split, "splits: ", splits)
-            highest_impurity = 0
-            highest_i = 0
-            for i in range(1, len(splits)):
-                current_impurity = self._impurity(y_encoded[splits[i-1]:splits[i]]) 
-                if current_impurity > highest_impurity:
-                    highest_i = i
-                    highest_impurity = current_impurity
-
-        #Categorization of x
-        treshold = []
-        treshold.append(x_sort[0])
-        for i in range(1, len(splits) - 1):
-            treshold.append((x_sort[splits[i]] + x_sort[splits[i-1]])/2)
-        treshold.append(x_sort[len(x)-1])
-
-        labels = np.arange(len(np.unique(treshold))-1)
-        print(treshold)
-        x_cat = pd.cut(x, bins=treshold, labels=labels, include_lowest=True, right=True, duplicates='drop')
-        return x_cat
+        if k_method!="elbow" and k_method!="silhouette": 
+            return
+        
+        self.base_model = getattr(C_SCRIPT, model + "_c")
+        self.model = getattr(C_SCRIPT, model + "_" + k_method + "_c")
     
-    def _impurity(self, y):
-        impurity = 0
-        dist = np.unique(y, return_counts=True)[1]/len(y)
-        if self.impurity_method == "gini":
-            impurity = 1
-            for x in dist:
-                impurity -= x*x
-            return impurity
-        elif self.impurity_method == "entropy":
-            for x in dist:
-                impurity -= x*math.log10(x)
-            return impurity
-        else:
-            impurity = max(dist)
-        return impurity
+    def categorize(self, x):
+        if self.k_method!="elbow" and self.k_method!="silhouette":
+            print("An unknown method for selecting the number K of clusters has been given. Please choose between 'elbow' and 'silhouette")
+            return
+        
+        if self.sequential:
+            x_ord = sorted(x)
+            self.base_model.restype = FLO
+            
+            n_classes = 1
+            highest_i = 1
+            highest_variance = 1
+
+            splits = [-1, len(x)-1]
+            while(n_classes < self.min_classes or (highest_variance > self.min_variance and n_classes < self.max_classes)):
+                size = len(x_ord[(splits[highest_i-1]+1):splits[highest_i]])
+
+                XFLO = FLO * size
+                x_flo_c = XFLO(*x_ord[(splits[highest_i-1]+1):splits[highest_i]])
+
+                LABINT = INT * size
+                x_cat_1 = LABINT()
+
+                split = int(self.base_model(size, 2, x_flo_c, x_cat_1, FLO(3.0)))
+                bisect.insort(splits, split)
+                print(splits)
+
+                highest_i = 0
+                highest_variance = 0
+                n_classes += 1
+                for i in range(1, len(splits)):
+                    range_sq = (x_ord[splits[i]] - x_ord[splits[i-1]+1])
+                    variance = np.var(x_ord[(splits[i-1]+1):splits[i]])/range_sq if range_sq!=0 else 0
+                    print("range:", range_sq, "variance:", np.var(x_ord[(splits[i-1]+1):splits[i]]), "cv:", variance)
+                    if(variance > highest_variance):
+                        highest_variance = variance
+                        highest_i = i
+                return x_cat_1
+                
+
+        XFLO = FLO * len(x)
+        x_flo_c = XFLO(*x)
+
+        LABINT = INT * len(x)
+        x_cat_1 = LABINT()
+
+        if(self.k):
+            self.base_model(len(x), self.k, x_flo_c, x_cat_1)
+            return x_cat_1
+
+        x_cat_2 = LABINT()
+        if(self.k_method == "elbow"):
+            k_opt = self.model(len(x), self.max_classes, self.min_classes, self.min_clustersize, x_flo_c, x_cat_1, x_cat_2)
+
+            if (k_opt % 2 == 0):
+                return x_cat_2
+            else:
+                return x_cat_1
+        
+        if(self.k_method == "silhouette"):
+            self.model.restype = FLO
+            k_opt = self.model(len(x), self.max_classes, self.min_classes, self.min_clustersize, x_flo_c, x_cat_1, x_cat_2)
+            frac = math.modf(k_opt)
+            if(frac == 0):
+                return x_cat_1
+            else:
+                return x_cat_2
