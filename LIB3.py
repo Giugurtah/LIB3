@@ -20,8 +20,6 @@ C_SCRIPT = ct.CDLL(str(Path(__file__).parent.absolute()) + '/LIB3C.so')
 
 gpi_c = getattr(C_SCRIPT,'gpi_c')
 gpi_c.restype = FLO
-extract = getattr(C_SCRIPT,'extract')
-extract.restype = INT
 
 class Node:
     def __init__(self, 
@@ -475,10 +473,12 @@ class Tree:
             return {
                     "isLeaf": 1,
                     "distribution" : dist,
+                    "distArray": node.distribution.tolist(),
                     "position": node.position,
                     "value": str(node.value),
                     "impurity": node.impurity,
                     "labels": node.N,
+                    "labArray": node.labels.tolist(),
                     "gcr" : gcr,
                     }
         
@@ -493,6 +493,7 @@ class Tree:
             "isLeaf": 0,
             "feature": node.feature,
             "distribution" : dist,
+            "distArray": node.distribution.tolist(),
             "lift1" : lift1,
             "lift2" : lift2,
             "treshold" : ', '.join(str(x) for x in node.treshold),
@@ -501,6 +502,7 @@ class Tree:
             "ppi" : node.ppi,
             "impurity": node.impurity,
             "labels": node.N,
+            "labArray": node.labels.tolist(),
             "children": [
                 self._recurse(node.left),
                 self._recurse(node.right),
@@ -527,12 +529,13 @@ class Tree:
                 .tree-container {{ display: flex; justify-content: center; margin-top: 20px}}
                 .node {{ border: 2px solid blue; border-radius: 100%; background-color: lightcyan; color: lightcyan ;display: inline-block;  position: absolute; width: 24px; height: 24px}} 
                 .square {{ position: absolute; transform: translate(14px, 14px); z-index: -1}}
-                .leaf {{ border: 2px solid blue; background-color: lightcyan; display: inline-block; color: blue; font-weight: bolder; position: absolute; width: 24px; height: 24px; line-height: 24px}}
+                .leaf {{ display: inline-block; font-weight: bolder; position: absolute; line-height: 24px}}
                 .d_r:after {{ content: ""; width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: linear-gradient(to top right, transparent calc(50% - 1px), blue, transparent calc(50% + 1px))}}
                 .d_l:after {{ content: ""; width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: linear-gradient(to top left, transparent calc(50% - 1px), blue, transparent calc(50% + 1px))}}
                 .tooltip {{ position: absolute; background-color: rgba(0, 0, 0, 0.8); color: white; padding: 8px; border-radius: 5px; white-space: nowrap; visibility: hidden; opacity: 0; transition: opacity 0.3s; font-size: 14px; width: fit-content}}
                 .t_l {{ transform: translate(30px, -5px)}}
                 .t_r {{ transform: translateX(-100%) translate(-2px, -5px)}}
+                .leaf_value{{ display: inline-block; font-weight: bolder; position: absolute; line-height: 24px; transform: translate(6px, 30px)}}
             </style> 
         </head> 
         <body> 
@@ -551,13 +554,32 @@ class Tree:
                         nodeElement.classList.add("leaf")
                         nodeElement.style.left = left + "%"
                         nodeElement.style.top = top + "%"
-                        nodeElement.innerText = node.value
 
                         nodeElement.onmouseover = function(event) {{ showTooltip(event, node, top, left); }};
                         nodeElement.onmouseout = hideTooltip;
                         
+                        let nodeValue = document.createElement("div")
+                        nodeValue.classList.add("leaf_value")
+                        nodeValue.style.left = left + "%"
+                        nodeValue.style.top = top + "%"
+                        nodeValue.innerText = node.value
+
+                        let canvas = document.createElement("canvas");
+                        canvas.width = 36;
+                        canvas.height = 36;
+                        canvas.style.position = "absolute";
+                        canvas.style.top = "-6px";
+                        canvas.style.left = "-6px";
+                        nodeElement.appendChild(canvas);
+
                         tree = document.getElementById("tree")
                         tree.appendChild(nodeElement)
+                        tree.appendChild(nodeValue)
+
+                        // Disegna il grafico a torta direttamente
+                        if (node.distribution) {{
+                            drawPieChart(canvas, node.distArray, node.labArray);
+                        }}
                         return
                     }}
 
@@ -584,14 +606,55 @@ class Tree:
                     rbranchElement.style.height = h + "%"
                     rbranchElement.style.width = d/2 + "%"
 
+                    // Creare un elemento canvas per il grafico a torta
+                    let canvas = document.createElement("canvas");
+                    canvas.width = 36;
+                    canvas.height = 36;
+                    canvas.style.position = "absolute";
+                    canvas.style.top = "-6px";
+                    canvas.style.left = "-6px";
+                    nodeElement.appendChild(canvas);
+
                     tree = document.getElementById("tree")
                     tree.appendChild(nodeElement)
                     tree.appendChild(lbranchElement)
                     tree.appendChild(rbranchElement)
 
+                    if (node.distribution) {{
+                        drawPieChart(canvas, node.distArray, node.labArray);
+                    }}
+
                     iter(node.children[0], top+h, left-d/2, d/2, h)
                     iter(node.children[1], top+h, left+d/2, d/2, h)
                     return
+                }}
+
+                // Funzione per disegnare un grafico a torta con il canvas
+                function drawPieChart(canvas, distArray, labArray) {{
+                    let ctx = canvas.getContext("2d");
+                    let total = distArray.reduce((sum, val) => sum + val, 0);
+                    let colors = ["#FF6384", "#36A2EB", "#FFCE56", "#4CAF50", "#9966FF", "#795548", "#D81B60", "#00ACC1", "#8D6E63", "#FF9800"];
+                    let startAngle = 0;
+
+                    distArray.forEach((value, index) => {{
+                        let sliceAngle = (value / total) * 2 * Math.PI;
+
+                        ctx.beginPath();
+                        ctx.moveTo(18, 18);  // Centro del cerchio
+                        ctx.arc(18, 18, 16, startAngle, startAngle + sliceAngle);
+                        ctx.closePath();
+                        ctx.fillStyle = colors[labArray[index] % colors.length]; // Usa i colori in loop
+                        ctx.fill();
+
+                        startAngle += sliceAngle;
+                    }});
+
+                    // Disegna il bordo del cerchio
+                    ctx.beginPath();
+                    ctx.arc(18, 18, 17, 0, 2 * Math.PI);
+                    ctx.strokeStyle = "blue";
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
                 }}
 
                 function showTooltip(event, node, top, left) {{
