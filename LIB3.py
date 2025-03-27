@@ -15,6 +15,12 @@ FLO = ct.c_float
 PFLO = ct.POINTER(FLO)
 PPFLO = ct.POINTER(PFLO)
 
+#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
+#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
+#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
+#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
+#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
+#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
 
 C_SCRIPT = ct.CDLL(str(Path(__file__).parent.absolute()) + '/LIB3C.so')
 
@@ -72,6 +78,7 @@ class Tree:
                  FAST=False):
         
         col_config = {
+            "slba": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Alpha', 'Beta', 'LIFT_K1', 'LIFT_K2', 'GCR', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
             "lba": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Alpha', 'Beta', 'LIFT_K1', 'LIFT_K2', 'GCR', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
             "twoStage": ['id', 'Node Type', 'Value','Splitting Variable', 'n', 'Class Distribution', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
             "twoing": ['id', 'Node Type', 'Value', 'Splitting Variable', 'n', 'Class Distribution', 'Treshold', 'Impurity', 'Gpi', 'Ppi'],
@@ -98,15 +105,26 @@ class Tree:
         self.r_c = None
         self.root=None
 
-    def fit(self, X, y):
+    def fit(self, X, y, x_s = None):
         if(self.impurity_method!="entropy" and self.impurity_method!="gini" and self.impurity_method!="error"):
             print("ERROR. An impurity method that is not gini, error or entropy has been given.\nA gini impurity method has been automatichally given")
             self.impurity_method = "gini"
 
         self.targhet_dist = [np.unique(y), np.unique(y, return_counts=True)[1]/len(y)]
+
+        if self.model_name == "slba" and x_s is None:
+            print("A Simultaneous Latent Budget Analysis was selected but no stratifyinng variable was given")
+            return
+        
+        if self.model_name == "slba" and x_s is not None:
+            self._slba(X, y, x_s)
+
+        if self.model_name != "slba" and x_s is not None:
+            print("A stratifying variable has been given but the Simultaneous Latent Budget Analysis model was not selcted.")
+            print("The selected model will be regularly performed without taking in consideration the stratifying variable.")
+
         #The recursive function is called
         self.root = self._grow_tree(X, y)
-        print("Inizio pruning")
         self._pruning(self.root)
 
     def predict(self, X):
@@ -151,7 +169,6 @@ class Tree:
         gpi, array_of_Fs = self._gpi(X, y, n_samples)
         gpi_index = np.arange(n_feats)
         gpi, gpi_index = zip(*sorted(zip(gpi, gpi_index), reverse=True))
-
         if(self.compound_feats and n_feats > 1):
             #This section generates a compound variable using the two variables with the highest gpi
             feature_1 = X.columns[gpi_index[0]]
@@ -165,7 +182,7 @@ class Tree:
 
             FLOARR = FLO * J
             PFLOARR = PFLO * I
-            
+
             ptr_rc = PFLOARR()
             # Array of pointers initialization
             for i in range(I):
@@ -177,7 +194,7 @@ class Tree:
             gpi = np.append(gpi, gpi_c(I, J, ptr_rc))
             gpi_index = np.append(gpi_index, n_feats)
             gpi, gpi_index = zip(*sorted(zip(gpi, gpi_index), reverse=True))
-        
+
         # Amongst the best predictors the one with the highest improvement (highest ppi) is chosen to perform the split
         best_feature, best_treshold, best_ppi, best_idx, alpha, beta = self._find_best_predictor(X, n_labels, array_of_Fs, gpi_index, gpi)
 
@@ -300,7 +317,6 @@ class Tree:
 
         if node.left and node.right and node.left.value is not None and node.right.value is not None:
             if node.left.value == node.right.value:
-                print("Esecuzione pruning sul nodo:", node.position)
                 node.gpi = None
                 node.ppi = None
                 node.feature = None
@@ -331,13 +347,19 @@ class Tree:
 
         return node
 
+    def _slba(self, X, y, x_s):
+        #UNCONSTRAINED EXECUTION
+
+        return
+
+
     #Update functions  
     def _get_gcr(self, distribution, labels):
         gcr = [0 for _ in range(len(labels))]
         for i in range(len(labels)):
             for j in range(len(self.targhet_dist[0])):
                 if(self.targhet_dist[0][j] == labels[i]):
-                    gcr[i] = float(distribution[i]/self.targhet_dist[1][j])
+                    gcr[i] = (distribution[i]/self.targhet_dist[1][j])
         return gcr
 
     def _traverse_tree(self, x, node):
@@ -377,6 +399,7 @@ class Tree:
     def _gpi(self, X, y, N): 
             gpi = []
             arr = []
+
             for x in X:
                 F = pd.crosstab(X.loc[:, x], y, margins=False)
                 I = len(F)
@@ -463,7 +486,6 @@ class Tree:
             i +=1 
 
     def _recurse(self, node):
-        print(node.position)
         dist = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.distribution.tolist()))
         if node.value is not None:
             if(self.model_name == "lba"):
@@ -509,12 +531,13 @@ class Tree:
             ]
         }
         
-    def plot_html(self, output_file = "tree_visualization.html"):
+    def plot_html(self, output_file = "tree_visualization.html", color_palet = ["#FF6384", "#36A2EB", "#FFCE56", "#4CAF50", "#9966FF", "#795548", "#D81B60", "#00ACC1", "#8D6E63", "#FF9800"]):
         tree_JSON = json.dumps(self._recurse(self.root), indent=4)
         dataPlot = {
             "l_c": self.l_c,
             "r_c": self.r_c,
-            "depth": self.depth
+            "depth": self.depth,
+            "colors": color_palet
         }
         plot_JSON = json.dumps(dataPlot, indent=4)
         html_content = f""" 
@@ -533,8 +556,8 @@ class Tree:
                 .d_r:after {{ content: ""; width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: linear-gradient(to top right, transparent calc(50% - 1px), blue, transparent calc(50% + 1px))}}
                 .d_l:after {{ content: ""; width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: linear-gradient(to top left, transparent calc(50% - 1px), blue, transparent calc(50% + 1px))}}
                 .tooltip {{ position: absolute; background-color: rgba(0, 0, 0, 0.8); color: white; padding: 8px; border-radius: 5px; white-space: nowrap; visibility: hidden; opacity: 0; transition: opacity 0.3s; font-size: 14px; width: fit-content}}
-                .t_l {{ transform: translate(30px, -5px)}}
-                .t_r {{ transform: translateX(-100%) translate(-2px, -5px)}}
+                .t_l {{ transform: translate(35px, -5px)}}
+                .t_r {{ transform: translateX(-100%) translate(-8px, -5px)}}
                 .leaf_value{{ display: inline-block; font-weight: bolder; position: absolute; line-height: 24px; transform: translate(6px, 30px)}}
             </style> 
         </head> 
@@ -633,7 +656,6 @@ class Tree:
                 function drawPieChart(canvas, distArray, labArray) {{
                     let ctx = canvas.getContext("2d");
                     let total = distArray.reduce((sum, val) => sum + val, 0);
-                    let colors = ["#FF6384", "#36A2EB", "#FFCE56", "#4CAF50", "#9966FF", "#795548", "#D81B60", "#00ACC1", "#8D6E63", "#FF9800"];
                     let startAngle = 0;
 
                     distArray.forEach((value, index) => {{
@@ -643,7 +665,7 @@ class Tree:
                         ctx.moveTo(18, 18);  // Centro del cerchio
                         ctx.arc(18, 18, 16, startAngle, startAngle + sliceAngle);
                         ctx.closePath();
-                        ctx.fillStyle = colors[labArray[index] % colors.length]; // Usa i colori in loop
+                        ctx.fillStyle = plotData.colors[labArray[index] % plotData.colors.length]; // Usa i colori in loop
                         ctx.fill();
 
                         startAngle += sliceAngle;
@@ -661,7 +683,7 @@ class Tree:
                     tooltip = document.getElementById('tooltip')
 
                     if(node.isLeaf == 1){{
-                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution +  "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nGCR: [" + node.gcr  + "]\\nValue: "+ node.value;
+                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution +  "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nGCR: [" + node.gcr  + "]\\nPrediction: "+ node.value;
                     }} else {{
                         if(node.lift1 && node.lift2) {{
                             tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels +  "\\nClass distribution: [" + node.distribution + "]\\nLIFT left: [" + node.lift1 + "]\\nLIFT right: [" + node.lift2 + "]\\nFeature: " + node.feature + "\\nThreshold left: [" + node.treshold + "]\\nGpi: " + node.gpi.toFixed(3) + "\\nPpi: " + node.ppi.toFixed(3)  + "\\nImpurty: " + node.impurity.toFixed(3);
@@ -714,6 +736,9 @@ class Categorizer:
         self.k_method = k_method
         self.sequential = sequential
 
+        if model != "kmeans":
+            model = "kmeans"
+
         if k_method!="elbow" and k_method!="silhouette": 
             return
         
@@ -726,15 +751,16 @@ class Categorizer:
             return
         
         if self.sequential:
+            N = len(x)
             x_ord = sorted(x)
             self.base_model.restype = FLO
             
             n_classes = 1
             highest_i = 1
-            highest_variance = 1
+            highest_impurity = 1
 
             splits = [-1, len(x)-1]
-            while(n_classes < self.min_classes or (highest_variance > self.min_variance and n_classes < self.max_classes)):
+            while(n_classes < self.min_classes or (highest_impurity > self.min_variance and n_classes < self.max_classes)):
                 size = len(x_ord[(splits[highest_i-1]+1):splits[highest_i]])
 
                 XFLO = FLO * size
@@ -743,21 +769,26 @@ class Categorizer:
                 LABINT = INT * size
                 x_cat_1 = LABINT()
 
-                split = int(self.base_model(size, 2, x_flo_c, x_cat_1, FLO(3.0)))
+                split = splits[highest_i-1]+ 1 + int(self.base_model(size, 2, x_flo_c, x_cat_1, FLO(3.0)))
                 bisect.insort(splits, split)
                 print(splits)
 
                 highest_i = 0
-                highest_variance = 0
+                highest_impurity = 0
                 n_classes += 1
                 for i in range(1, len(splits)):
-                    range_sq = (x_ord[splits[i]] - x_ord[splits[i-1]+1])
-                    variance = np.var(x_ord[(splits[i-1]+1):splits[i]])/range_sq if range_sq!=0 else 0
-                    print("range:", range_sq, "variance:", np.var(x_ord[(splits[i-1]+1):splits[i]]), "cv:", variance)
-                    if(variance > highest_variance):
-                        highest_variance = variance
+                    mean = np.mean(x_ord[splits[i-1]+1:splits[i]])
+                    impurity = ((x_ord[splits[i-1]+1:splits[i]] - mean) ** 2).sum()/N   
+                    print("impurity:", impurity)
+                    if(impurity > highest_impurity):
+                        highest_impurity = impurity
                         highest_i = i
-                return x_cat_1
+
+            splits[0] = 0
+            treshold = [x_ord[splits[_]] for _ in range(len(splits))]
+            labels = np.arange(len(splits)-1)
+            x_cat = pd.cut(x, bins=treshold, labels=labels, include_lowest=True, right=True, duplicates='drop')
+            return x_cat
                 
 
         XFLO = FLO * len(x)
