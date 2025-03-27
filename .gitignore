@@ -1,6 +1,5 @@
 /.DS_Store
 /.vscode
-/LIB3C.c
 /TREE_test.ipynb
 /Tree_visualization_LBA.html
 /Tree_visualization_LBA_COMPOUND.html
@@ -23,3 +22,4 @@
 /test_tkinter.py
 /tree_visualization.html
 /tree_visualization_changed.html
+/concat_df.csv
