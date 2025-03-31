@@ -11,7 +11,7 @@ from pathlib import Path
 # C types declaration
 INT = ct.c_int
 PINT = ct.POINTER(INT)
-FLO = ct.c_float
+FLO = ct.c_double
 PFLO = ct.POINTER(FLO)
 PPFLO = ct.POINTER(PFLO)
 

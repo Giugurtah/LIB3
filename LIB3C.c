@@ -5,9 +5,10 @@
 #include <time.h>
 #include <float.h> 
 
-#define EPSILON 1e-10
+#define EPSILON 1e-5
 
-// Helper functions
+//*TREE FUNCTIONS (SLBA is in a separate section of this file)
+//Helper functions
 void mat_print_double(int I, int J, double mat[I][J]){ //Function used to print a double matrix
     for(int i=0; i<I; i++){
         for(int j=0; j<J; j++){
@@ -42,12 +43,14 @@ void mat_tras_ptr(int I, int J, double** mat, double mat_res[J][I]){ //Function 
 }
 
 void prod_matrix(int I, int J, int Z, double mat1[I][J], double mat2[J][Z], double mat_res[I][Z]){ //Given two matrices this function returns their product
+    double sum;
     for(int i=0; i<I; i++){
         for(int z=0; z<Z; z++){
-            mat_res[i][z] = 0.0;
+            sum = 0.0;
             for(int j=0; j<J; j++){
-                mat_res[i][z] += ((double)mat1[i][j] * (double)mat2[j][z]);
+                sum += ((double)mat1[i][j] * (double)mat2[j][z]);
             }
+            mat_res[i][z] = sum;
         }
     }
 }
@@ -75,12 +78,14 @@ void prod_mat_ptr_vect(int I, int J, double **mat, double arr[J], double arr_res
 }
 
 void prod_matrix_ptr(int I, int J, int Z, double** mat1, double mat2[J][Z], double mat_res[I][Z]){ //Given two matrices this function returns their product
+    double sum;
     for(int i=0; i<I; i++){
         for(int z=0; z<Z; z++){
-            mat_res[i][z] = 0.0;
+            sum = 0.0;
             for(int j=0; j<J; j++){
-                mat_res[i][z] += ((double)mat1[i][j] * (double)mat2[j][z]);
+                sum += ((double)mat1[i][j] * (double)mat2[j][z]);
             }
+            mat_res[i][z] = sum;
         }
     }
 }
@@ -210,7 +215,7 @@ void incr_S(int I, int S[I], int S_N[I]){ // Given S and S_N as boolean arrays, 
     }
 }
 
-// Impurity and predicatbality functions 
+//Impurity and predicatbality functions 
 double gini_impurity(int I, int J, int S[I], double** F){ //Function used to evaluate the gini impurity
     double sumI, sumJ = 0.0;
     double N = 0.0;
@@ -270,7 +275,7 @@ double gpi_c(int I, int J, double** F){ //Given F this function returns the gpi
     return gpi;
 }
 
-// Function models
+//Function models
 void twoStage_c(int I, int J, double** F, double* S_best, double** alpha, double** beta){ //This function, given F a contingency matrix, executes a two stage algorithm
     // Algo variables
     int S_N[I], S[I];
@@ -505,10 +510,12 @@ void lba_c(int I, int J, double** F, double* S_best, double** alpha, double** be
     }
 }
 
-//Categorization function
+//*CATEGORIZATION
 void kplusplus_init(int K, double clusters[K], int I, double X[I]){ //This function is used to initialize the centroids for a KMeans algorithm 
     double sum, dist, dist_min;
     double distances[I];
+
+    srand(time(NULL));
 
     //First centroid init
     clusters[0] = X[rand() % I];
@@ -734,15 +741,16 @@ double kmeans_silhouette_c(int I, int Kmax, int Kmin, int minN, double X[I], int
     return (double) 0.5*alt + optimal_k;
 }
 
-//Simultaneus LBA
-void print_double_bytes(double num) {
+//*SIMULTANEOUS LATENT BUDGET ANALYSIS
+//Helper function
+void print_double_bytes(double num) { //This function is used for debugging
     unsigned char *byte_ptr = (unsigned char*)&num; 
     for (int i = 0; i < sizeof(double); i++) {
         printf("%02X ", byte_ptr[i]);  
     }
 }
 
-double round_with_tolerance(double x) {
+double round_with_tolerance(double x) { //This function is used to prevent errors that might occur because of small approximatons
     double rounded = round(x);  
 
     if (fabs(x - rounded) < EPSILON) {
@@ -752,7 +760,7 @@ double round_with_tolerance(double x) {
     return x; 
 }
 
-void mat_inv_GJ(int J, double A[J][J], double Ai[J][J]){
+void mat_inv_GJ(int J, double A[J][J], double Ai[J][J]){ //This function, given A, returns its inverse using Gauss-Johnson method
     double prop;
     //Inizialization of the inverted matrix
     for(int i=0; i<J; i++){
@@ -791,7 +799,7 @@ void mat_inv_GJ(int J, double A[J][J], double Ai[J][J]){
     return;
 }
 
-void mat_inv_NS(int J, double A[J][J], double Ai[J][J]){
+void mat_inv_NS(int J, double A[J][J], double Ai[J][J]){ //This function, given A, returns its pseudo-inverse using Newton-Shultz method
     double X[J][J], X_temp[J][J], I_2[J][J], AX[J][J], I_2AX[J][J], norm = 0, err;
     int MAX_ITER = 200;
 
@@ -839,8 +847,9 @@ void mat_inv_NS(int J, double A[J][J], double Ai[J][J]){
                 err += fabs(X_temp[i][j] - X[i][j]);
             }
         }
+        printf("L'errore è: %f\n", err);
 
-        if(err < 0.000005){
+        if(err < 0.00000005){
             for(int i=0; i<J; i++){
                 for(int j=0; j<J; j++){
                     Ai[i][j] = X_temp[i][j];
@@ -865,7 +874,7 @@ void mat_inv_NS(int J, double A[J][J], double Ai[J][J]){
     return;
 }
 
-int check_det(int J, double A[J][J]){
+int check_det(int J, double A[J][J]){ //This function, given A, returns its determinant
     double prop, det = 1.0;
     double A_aux[J][J];
     for(int i=0; i<J; i++){
@@ -884,126 +893,75 @@ int check_det(int J, double A[J][J]){
     for(int i=0; i<J; i++){
         det *= A_aux[i][i];
     }
-    if(det == 0.0){
+    printf("determinante: %f\n", det);
+
+    det = round_with_tolerance(det);
+
+    if(det == 0.0 || det == -0.0){
         return 0;
     }
     return 1;
 }
 
-void calc_x0(int I, int J, double Q[I][J], double QtQi[J][J], double r[J], double x_0[J]){
-    double Qt[J][I], QtQ[J][J], QtQiQt[J][I];
-    int inv;
-
-    mat_tras(I, J, Q, Qt); //Transpose of the matrix Q
-    prod_matrix(J, I, J, Qt, Q, QtQ); //Product of Qt and Q
-
-    mat_inv_NS(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
-
-    prod_matrix(J, J, I, QtQi, Qt, QtQiQt); //(Q'Q)^(-1)Q'
-    prod_mat_vect(J, I, QtQiQt, r, x_0); // x_0 = (Q'Q)^(-1)Q'r
-
-    printf("Array x_0: "); //!DA CANCELLARE
-    for(int i=0; i<J; i++){ //!DA CANCELLARE
-        printf("%f ", x_0[i]); //!DA CANCELLARE
-    } //!DA CANCELLARE
-    printf("\n"); //!DA CANCELLARE
-
-    return;
-}
-
-void calc_lamb(int K, int J, double QtQi[J][J], double **C, double *d, double x_0[J], double lambda[K]){
-    double Ct[J][K], CQtQi[K][J], CQtQiCt[K][K], CQtQiCti[K][K], Cx0[K], d_Cx0[K];
-    int inv; 
-
-    mat_tras_ptr(K, J, C, Ct); //Transpose of the matrix C
-
-    prod_matrix_ptr(K, J, J, C, QtQi, CQtQi); //Product of C and (Q'Q)^-1
-
-    prod_matrix(K, J, K, CQtQi, Ct, CQtQiCt); //Product of CQtQiCt
-
-    mat_inv_NS(K, CQtQiCt, CQtQiCti); //(CQtQiCt)^-1 is calculated as the inverted matrix of (CQtQiCt)
-
-    printf("Inversa della matrice CQtQiCt:\n");
-    mat_print_double(K, K, CQtQiCti);
-
-    prod_mat_ptr_vect(K, J, C, x_0, Cx0); //Product of Cx_0
-    for(int i=0; i<K; i++){
-        d_Cx0[i] = d[i] - Cx0[i]; //Array of (d-Cx_0)
-    }
-
-    prod_mat_vect(K, K, CQtQiCti, d_Cx0, lambda); //lambda = (((C(Q'Q)^-1)C')^-1)(d-Cx_0)
-    for(int i=0; i<K; i++){
-        lambda[i] = round_with_tolerance(lambda[i]);
-        if(lambda[i] == -0.0){
-            lambda[i] = 0.0;
+void get_AIj(int I, int J, int K, double A[I][K], double AIj[I*J][K*J]){
+    for(int i=0; i<I*J; i++){
+        for(int k=0; k<K*J; k++){
+            AIj[i][k] = 0.0;
         }
     }
-    
-    printf("Array lambda: ");  //!DA CANCELLARE
-    for(int i=0; i<K; i++){  //!DA CANCELLARE
-        printf("%f ", lambda[i]);  //!DA CANCELLARE
-    }  //!DA CANCELLARE
-    printf("\n");  //!DA CANCELLARE
-    return;
-}
-
-void calc_x(int K, int J, double QtQi[J][J], double **C, double lambda[K], double x_0[J], double x[J]){
-    double Ct[J][K], QtQiCt[J][K], QtQiCtL[J];
-
-    mat_tras_ptr(K, J, C, Ct);
-    prod_matrix(J, J, K, QtQi, Ct, QtQiCt);
-    prod_mat_vect(J, K, QtQiCt, lambda, QtQiCtL);
-
-    for(int i=0; i<J; i++){
-        x[i] = round_with_tolerance(x_0[i] + QtQiCtL[i]);
-        if(x[i] == -0.0){
-            x[i] = 0.0;
+    for(int j=0; j<J; j++){
+        for(int i=0; i<I; i++){
+            for(int k=0; k<K; k++){
+                AIj[I*j + i][K*j + k] = A[i][k];
+            }
         }
     }
-
-    printf("Array x: ");
-    for(int i=0; i<J; i++){
-        printf("%f ", x[i]);
-    }
-    printf("\n");
-    return;
 }
 
-void add_row_C(int K, int J, double **C, double arr[J]){
+void vectorize_P(int I, int J, int t, double ***mat, double vect[I*J]){
+    for(int i=0; i<I; i++){
+        for(int j=0; j<J; j++){
+            vect[i*J + j] = mat[j][i][t];
+        }
+    }
+}
+
+//The following functions are used to manage C and d, i.e. add/remove rows/values to/from C and d or free the memory when C and d are no longer needed
+void add_row_C(int K, int J, double ***C, double arr[J]){
     // Add row to C
-    C = (double **)realloc(C, (K + 1) * sizeof(double *));
-    C[K] = (double *)malloc(J * sizeof(double * ));
+    *C = (double **)realloc(*C, (K+1) * sizeof(double *));
+    (*C)[K] = (double *)malloc(J * sizeof(double));
 
     for(int i=0; i<J; i++){
-        C[K][i] = arr[i];
+        (*C)[K][i] = arr[i];
     }
     return;
 }
 
-void add_val_d(int K, double *d, double val){
+void add_val_d(int K, double **d, double val){
     // Add value to d
-    d = (double *)realloc(d, (K + 1) * sizeof(double));
-    d[K] = val;
+    *d = (double *)realloc(*d, (K + 1) * sizeof(double));
+    (*d)[K] = val;
     return;
 }
 
-void remove_row_C(int K, int J, int rem, double **C){
+void remove_row_C(int K, int J, int rem, double ***C){
     for(int i=rem; i<K-1; i++){
         for(int j=0; j<J; j++){
-            C[i][j] = C[i+1][j];
+            (*C)[i][j] = (*C)[i+1][j];
         }
     }
 
-    free(C[K-1]);
-    C = (double **)realloc(C, (K - 1) * sizeof(double *));
+    //free(*C[K-1]);
+    *C = (double **)realloc(*C, (K - 1) * sizeof(double *));
     return;
 }
 
-void remove_val_d(int K, int rem, double *d){
+void remove_val_d(int K, int rem, double **d){
     for(int i=rem; i<K-1; i++){
-        d[i] = d[i+1];
+        (*d)[i] = (*d)[i+1];
     }
-    d = (double *)realloc(d, (K - 1) * sizeof(double));
+    *d = (double *)realloc(*d, (K - 1) * sizeof(double));
     return;
 }
 
@@ -1016,66 +974,224 @@ void free_C(int K, double **C){
     return;
 }
 
-int main()
-{
-    // int I = 4;
-    // int J = 3;
-    // int K = 3;
-    // double Q[I][J], r[I], x_0[J], QtQi[J][J], lambda[K], x[J];
+//Function used in the execution of the algorithm
+void calc_x0(int I, int J, double Q[I][J], double QtQi[J][J], double r[I], double x_0[J]){ //This function evaluates X0
+    double Qt[J][I], QtQ[J][J], QtQiQt[J][I];
+    int det;
 
-    // Q[0][0] = 11.0; Q[0][1] = 9.0; Q[0][2] = 3.0;
-    // Q[1][0] = 5.0; Q[1][1] = 0.0; Q[1][2] = 4.0;
-    // Q[2][0] = 7.0; Q[2][1] = 9.0; Q[2][2] = 9.0;
-    // Q[3][0] = 1.0; Q[3][1] = 2.0; Q[3][2] = 3.0;
-    // r[0] = 1.0; r[1] = 3.0; r[2] = 2.0; r[3] = 1.0; 
+    mat_tras(I, J, Q, Qt); //Transpose of the matrix Q
+    prod_matrix(J, I, J, Qt, Q, QtQ); //Product of Qt and Q
 
-    // // Initialization of C and d
-    // double **C;
-    // double *d;
-    // C = (double **)malloc(K * sizeof(double *)); 
-    // for(int i=0; i<K; i++){ 
-    //     C[i] = (double *)malloc(J * sizeof(double));     
-    // } 
-    // d = (double *)malloc(K * sizeof(double)); 
-    // C[0][0] = 1.0; C[0][1] = 2.0; C[0][2] = 1.0; 
-    // C[1][0] = 3.0; C[1][1] = 2.0; C[1][2] = 1.0;
-    // C[2][0] = 1.0; C[2][1] = 4.0; C[2][2] = 7.0;
-    // d[0] = 2; d[1] = 4; d[2] = 6; 
+    printf("Matrice QtQ:\n");
+    mat_print_double(J,J,QtQ);
 
-    int I = 2, J = 2, K = 1;
-    double Q[I][J], r[I], x_0[J], QtQi[J][J], lambda[K], x[J];
+    det = check_det(J, QtQ);
+    if(det == 0.0){
+        mat_inv_NS(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
+    } else {
+        mat_inv_GJ(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
+    }
+    
+    printf("\nMatrice QtQi:\n");
+    mat_print_double(J,J,QtQi);
 
-    Q[0][0] = -1.0; Q[0][1] = 2.0; Q[1][0] = -3.0; Q[1][1] = 4.0; 
-    r[0] = 3.0, r[1] = 5.0;
+    prod_matrix(J, J, I, QtQi, Qt, QtQiQt); //(Q'Q)^(-1)Q'
 
-    double **C;
-    double *d;
+    printf("\nMatrice QtQiQt:\n");
+    mat_print_double(J,I,QtQiQt);
 
-    C = (double **)malloc(K * sizeof(double *)); 
-    for(int i=0; i<K; i++){ 
-        C[i] = (double *)malloc(J * sizeof(double));     
-    } 
-    d = (double *)malloc(K * sizeof(double)); 
-    C[0][0] = -2.0; C[0][1] = 2.0;
-    d[0] = 3.0;
+    prod_mat_vect(J, I, QtQiQt, r, x_0); // x_0 = (Q'Q)^(-1)Q'r
 
-    int stop = 0, feasible, i_f, counter; 
-    double add_array[J];
+    for(int i=0; i<J; i++){
+        x_0[i] = round_with_tolerance(x_0[i]);
+        if(x_0[i] == -0.0){
+            x_0[i] = 0.0;
+        }
+    }
 
+    printf("Array x_0: "); //!DA CANCELLARE
+    for(int i=0; i<J; i++){ //!DA CANCELLARE
+        printf("%f ", x_0[i]); //!DA CANCELLARE
+    } //!DA CANCELLARE
+    printf("\n"); //!DA CANCELLARE
+
+    return;
+}
+
+void calc_x0_exp(int I, int J, int T, double Q[T][I][J], double QtQi[J][J], double r[T][I], double x_0[J]){
+    double Qt[J][I], QtQ[J][J], Qtr[J], QtQ_temp[J][J], Qtr_temp[J];
+    int det;
+
+    //Sum[t from 1 to T]:Q'(t)Q(t) and Sum[t from 1 to T]:Q'(t)r(t) inzialization
+    for(int i=0; i<J; i++){
+        for(int j=0; j<J; j++){
+            QtQ[i][j] = 0.0;
+        }
+        Qtr[i] = 0.0;
+    }
+
+    for(int t=0; t<T; t++){
+        mat_tras(I, J, Q[t], Qt); //Transpose of the matrix Q(t)
+        prod_matrix(J, I, J, Qt, Q[t], QtQ_temp); //Product of Q'(t) and Q(t)
+
+        prod_mat_vect(J, I, Qt, r[t], Qtr_temp); //Product of Q'(t) and r(t)
+
+        for(int i=0; i<J; i++){
+            for(int j=0; j<J; j++){
+                QtQ[i][j] += QtQ_temp[i][j]; //Sum[t from 1 to T]:Q'(t)Q(t)
+            }
+            Qtr[i] += Qtr_temp[i];//Sum[t from 1 to T]:Q'(t)r(t)
+        }
+    }
+
+    printf("Matrice QtQ:\n");
+    mat_print_double(J,J,QtQ);
+
+    det = check_det(J, QtQ);
+    if(det == 0.0){
+        mat_inv_NS(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
+    } else {
+        mat_inv_GJ(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
+    }
+
+    printf("\nMatrice QtQi:\n");
+    mat_print_double(J,J,QtQi);
+
+    printf("\nVettore Qtr: ");
+    for(int i=0; i<J; i++){
+        printf("%f ", Qtr[i]);
+    }
+
+    prod_mat_vect(J, J, QtQi, Qtr, x_0); // x_0 = sum[Q(t)'Q(t)]^(-1)sum[Q(t)'r(t)]
+
+    for(int i=0; i<J; i++){
+        x_0[i] = round_with_tolerance(x_0[i]);
+        if(x_0[i] == -0.0){
+            x_0[i] = 0.0;
+        }
+    }
+
+    printf("\nArray x_0: "); //!DA CANCELLARE
+    for(int i=0; i<J; i++){ //!DA CANCELLARE
+        printf("%f ", x_0[i]); //!DA CANCELLARE
+    } //!DA CANCELLARE
+    printf("\n"); //!DA CANCELLARE
+
+    return;
+}
+
+void calc_lamb(int K, int J, double QtQi[J][J], double **C, double *d, double x_0[J], double lambda[K]){ //This function evaluates Lambda
+    double Ct[J][K], CQtQi[K][J], CQtQiCt[K][K], CQtQiCti[K][K], Cx0[K], d_Cx0[K];
+    int det; 
+
+    printf("\nVETTORE X_0 All'interno della funzione lambda: "); //!DA CANCELLARE
+    for(int i=0; i<J; i++){ //!DA CANCELLARE
+        printf("%f ", x_0[i]); //!DA CANCELLARE
+    } //!DA CANCELLARE
+    printf("\n"); //!DA CANCELLARE
+    
+    mat_tras_ptr(K, J, C, Ct); //Transpose of the matrix C
+
+    prod_matrix_ptr(K, J, J, C, QtQi, CQtQi); //Product of C and (Q'Q)^-1
+
+    prod_matrix(K, J, K, CQtQi, Ct, CQtQiCt); //Product of CQtQiCt
+
+    det = check_det(K, CQtQiCt);
+    if(det == 0.0){
+        mat_inv_NS(K, CQtQiCt, CQtQiCti); //QtQi is calculated as the inverted matrix of QtQ
+    } else {
+        mat_inv_GJ(K, CQtQiCt, CQtQiCti); //QtQi is calculated as the inverted matrix of QtQ
+    }
+
+    prod_mat_ptr_vect(K, J, C, x_0, Cx0); //Product of Cx_0
+
+    for(int i=0; i<K; i++){
+        d_Cx0[i] = d[i] - Cx0[i]; //Array of (d-Cx_0)
+    }
+
+    printf("\nVETTORE X_0 dopo calcolato d_Cx0: "); //!DA CANCELLARE
+    for(int i=0; i<J; i++){ //!DA CANCELLARE
+        printf("%f ", x_0[i]); //!DA CANCELLARE
+    } //!DA CANCELLARE
+    printf("\n"); //!DA CANCELLARE
+
+    prod_mat_vect(K, K, CQtQiCti, d_Cx0, lambda); //lambda = (((C(Q'Q)^-1)C')^-1)(d-Cx_0)
+
+    printf("\nVETTORE X_0 dopo calcolato lambda: "); //!DA CANCELLARE
+    for(int i=0; i<J; i++){ //!DA CANCELLARE
+        printf("%f ", x_0[i]); //!DA CANCELLARE
+    } //!DA CANCELLARE
+    printf("\n"); //!DA CANCELLARE
+
+    for(int i=0; i<K; i++){
+        lambda[i] = round_with_tolerance(lambda[i]);
+        if(lambda[i] == -0.0){
+            lambda[i] = 0.0;
+        }
+    }
+
+    printf("Array lambda: ");  //!DA CANCELLARE
+    for(int i=0; i<K; i++){  //!DA CANCELLARE
+        printf("%f ", lambda[i]);  //!DA CANCELLARE
+    }  //!DA CANCELLARE
+    printf("\n");  //!DA CANCELLARE
+    return;
+}
+
+void calc_x(int K, int J, double QtQi[J][J], double **C, double lambda[K], double x_0[J], double x[J]){ //This function evaluates X
+    double Ct[J][K], QtQiCt[J][K], QtQiCtL[J];
+
+    mat_tras_ptr(K, J, C, Ct);
+    prod_matrix(J, J, K, QtQi, Ct, QtQiCt);
+
+    printf("\nVETTORE X_0 All'interno della funzione calc x: ");//!DA CANCELLARE
+    for(int i=0; i<J; i++){ //!DA CANCELLARE
+        printf("%f ", x_0[i]); //!DA CANCELLARE
+    } //!DA CANCELLARE
+    printf("\n"); //!DA CANCELLARE
+
+    prod_mat_vect(J, K, QtQiCt, lambda, QtQiCtL);
+    
+    for(int i=0; i<J; i++){
+        x[i] = round_with_tolerance(x_0[i] + QtQiCtL[i]);
+        if(x[i] == -0.0){
+            x[i] = 0.0;
+        }
+    }
+
+    printf("\nArray x: ");
+    for(int i=0; i<J; i++){
+        printf("%f ", x[i]);
+    }
+    printf("\n");
+    return;
+}
+
+void gen_ssq(int I, int J, int K, double Q[I][J], double r[I], double x[J], double ***C, double **d){ //This function, given [Q,r,C,d], performs the SSQ method and returns X
+    int stop = 0, feasible, i_f, counter, k_temp = K; 
+    double add_array[J], QtQi[J][J], x_0[J], lambda[K], x_0_saved[J];
+
+    printf("INIZIO SSQ METHOD:\n");
     while(stop == 0){
         printf("INIZIO ITERAZIONE N.%d\n", stop+1);
         printf("Constraints C and d:\n");
-        printf("K: %d\n", K);
-        for(int i=0; i<K; i++){
+        printf("K: %d\n", k_temp);
+        for(int i=0; i<k_temp; i++){
             for(int j=0; j<J; j++){
-                printf("%f ", C[i][j]);
+                printf("%f ", (*C)[i][j]);
             }
-            printf(" | %f\n", d[i]);
+            printf(" | %f\n", (*d)[i]);
         }
 
-        calc_x0(I, J, Q, QtQi,r, x_0);
-        calc_lamb(K, J, QtQi, C, d, x_0, lambda);
-        calc_x(K, J, QtQi, C, lambda, x_0, x);
+        calc_x0(I, J, Q, QtQi, r, x_0);
+
+        for(int i=0; i<J; i++){
+            x_0_saved[i] = x_0[i];
+        }
+
+        calc_lamb(k_temp, J, QtQi, *C, *d, x_0, lambda);
+
+        calc_x(k_temp, J, QtQi, *C, lambda, x_0_saved, x);
 
         counter = 0;
         feasible = 1;
@@ -1097,9 +1213,9 @@ int main()
                 add_array[i] = 0.0;
             }
 
-            add_row_C(K, J, C, add_array);
-            add_val_d(K, d, 0.0);
-            K += 1;
+            add_row_C(k_temp, J, C, add_array);
+            add_val_d(k_temp, d, 0.0);
+            k_temp += 1;
             printf("C and d updated\n\n");
         }
         if(feasible == 1){
@@ -1112,20 +1228,305 @@ int main()
             }
             if(feasible == 0){
                 printf("LAMBDA NON FEASIBLE\n");
-                remove_row_C(K, J, i_f, C);
-                remove_val_d(K, i_f, d);
-                K -= 1;
+                remove_row_C(k_temp, J, i_f, C);
+                remove_val_d(k_temp, i_f, d);
+                k_temp -= 1;
             }
         }
         if(feasible == 1){
             printf("LAMBDA FEASIBLE\n");
             stop = 1;
         }
+        getchar();
+    }
+    while(k_temp != K){
+        printf("Err 1\n");
+        remove_row_C(k_temp, K, J, C);
+        printf("Err 2\n");
+        remove_val_d(k_temp, K, d);
+        k_temp -= 1;       
+    }
+}
+
+void gen_ssq_exp(int I, int J, int K, int T, double Q[T][I][J], double r[T][I], double x[J], double ***C, double **d){
+    int stop = 0, feasible, i_f, counter, k_temp = K; 
+    double add_array[J], QtQi[J][J], x_0[J], lambda[K];
+
+    printf("INIZIO SSQ METHOD:\n");
+    while(stop == 0){
+        printf("INIZIO ITERAZIONE N.%d\n", stop+1);
+        printf("Constraints C and d:\n");
+        printf("K: %d\n", k_temp);
+        for(int i=0; i<k_temp; i++){
+            for(int j=0; j<J; j++){
+                printf("%f ", (*C)[i][j]);
+            }
+            printf(" | %f\n", (*d)[i]);
+        }
+
+        calc_x0_exp(I, J, T, Q, QtQi, r, x_0);
+        calc_lamb(k_temp, J, QtQi, *C, *d, x_0, lambda);
+        calc_x(k_temp, J, QtQi, *C, lambda, x_0, x);
+
+        counter = 0;
+        feasible = 1;
+        while(counter < J && feasible == 1){
+            if(x[counter] < 0){
+                i_f = counter;
+                feasible = 0;
+            }
+            counter += 1;
+        }
+
+        if(feasible == 0){
+            printf("X NON FEASIBLE\n");
+            for(int i=0; i<i_f; i++){
+                add_array[i] = 0.0;
+            }
+            add_array[i_f] = 1.0;
+            for(int i=i_f+1; i<J; i++){
+                add_array[i] = 0.0;
+            }
+
+            add_row_C(k_temp, J, C, add_array);
+            add_val_d(k_temp, d, 0.0);
+            k_temp += 1;
+            printf("C and d updated\n\n");
+        }
+        if(feasible == 1){
+            printf("X FEASIBLE\n");
+            for(int i=J; i<K; i++){
+                if(lambda[i] < 0){
+                    i_f = i;
+                    feasible = 0;
+                }
+            }
+            if(feasible == 0){
+                printf("LAMBDA NON FEASIBLE\n");
+                remove_row_C(k_temp, J, i_f, C);
+                remove_val_d(k_temp, i_f, d);
+                k_temp -= 1;
+            }
+        }
+        if(feasible == 1){
+            printf("LAMBDA FEASIBLE\n");
+            stop = 1;
+        }
+        getchar();
+    }
+    while(k_temp != K){
+        remove_row_C(k_temp, K, J, C);
+        remove_val_d(k_temp, K, d);
+        k_temp -= 1;       
+    }
+}
+
+//Functions called by Python
+void omo1_slba_c(int J, int I, int T, double ***mat){
+    //First step: Minimizing with respect to the mixing parameters
+    printf("Inzio esecuzione in C");
+    int K = 3;
+    int t = 0;
+    int Kc = 1, Kc_l;
+    double randmat[J][K], B[J][K], ai[K], p[J], A[I][K];
+    mat_rand(J, K, randmat);
+    conv_ZB(J, K, randmat, B);
+
+    printf("No errore 1\n");
+    double **C;
+    double *d;
+
+    C = (double **)malloc(Kc * sizeof(double *)); 
+    for(int i=0; i<K; i++){ 
+        C[i] = (double *)malloc(K * sizeof(double));     
+    } 
+    d = (double *)malloc(Kc * sizeof(double)); 
+    C[0][0] = 1.0; C[0][1] = 1.0; C[0][2] = 1.0;
+    d[0] = 1.0;
+
+    printf("No errore 2\n");
+    for(int i=0; i<I; i++){
+        Kc_l = Kc;
+        for(int j=0; j<J; j++){
+            p[j] = mat[j][i][t];
+        }
+        printf("No errore 3\n");
+        gen_ssq(J, K, Kc_l, B, p, ai, &C, &d);
+        for(int k=0; k<K; k++){
+            A[i][k] = ai[k];
+        }
+        while(Kc_l != Kc){
+            remove_row_C(Kc_l, K, Kc, &C);
+            remove_val_d(Kc_l, Kc, &d);
+            Kc_l -= 1;
+        }
+        printf("\n");
     }
 
-    //Free the memory
-    free_C(K, C); //! NON CANCELLARE!!!!!!!!!
+    printf("Matrice A ottimizzata: \n");
+    mat_print_double(I, K, A);
+    printf("\n");
+
+    printf("No errore 4\n");
+    free_C(Kc, C); //! NON CANCELLARE!!!!!!!!!
     free(d); //! NON CANCELLARE!!!!!!!!!
-    return 0;
+    return;
 }
+
+void slba_omogen_A(int J, int I, int T, double ***mat){
+    //First step: Minimizing with respect to the mixing parameters
+    srand(time(NULL));
+    printf("Inzio esecuzione in C slba omogen\n");
+    int K = 3, Ke = K*J;
+    int Kc = 1, Kc_l;
+    int iter = 0, MAX_ITER=1;
+    double randmat[J][K], B[T][J][K], p[T][J], A[I][K], AIj[I*J][K*J], Bv[J*K], Pv[I*J], arr[Ke];
+
+    for(int t=0; t<T; t++){
+        mat_rand(J, K, randmat);
+        conv_ZB(J, K, randmat, B[t]);
+        printf("Matrice inizializzata B(%d):\n", t+1);
+        mat_print_double(J, K, B[t]);
+    }
+
+    printf("No errore 1\n");
+
+    //Inizialization of C and d used to optimize A
+    double **C;
+    double *d;
+
+    C = (double **)malloc(Kc * sizeof(double *)); 
+    for(int i=0; i<Kc; i++){ 
+        C[i] = (double *)malloc(K * sizeof(double));     
+    } 
+    d = (double *)malloc(Kc * sizeof(double)); 
+    C[0][0] = 1.0; C[0][1] = 1.0; C[0][2] = 1.0;
+    d[0] = 1.0;
+
+    //Inizialization of C_e and d_e used to optimize B
+    double **C_e = NULL;
+    double *d_e = NULL;
+
+    C_e = (double **)malloc(K * sizeof(double *)); 
+    for(int i=0; i<K; i++){ 
+        C_e[i] = (double *)malloc(Ke * sizeof(double));     
+    } 
+    for(int i=0; i<K; i++){
+        for(int j=0; j<J*K; j++){
+            C_e[i][j] = 0.0;
+        }
+    }
+    for(int i=0; i<K; i++){
+        for(int j=0; j<J; j++){
+            C_e[i][J*i + j]= 1.0;
+        }
+    }
+
+    d_e = (double *)malloc(K * sizeof(double)); 
+    for(int i=0; i<K; i++){
+        d_e[i] = 1.0;
+    }
+
+    printf("No errore 2\n");
+    while(iter < MAX_ITER){
+        //Optimization with respect of A
+        for(int i=0; i<I; i++){ 
+            Kc_l = Kc;
+            for(int t=0; t<T; t++){
+                for(int j=0; j<J; j++){
+                    p[t][j] = mat[j][i][t];
+                }
+            }
+
+            printf("No errore 3\n");
+            gen_ssq_exp(J, K, Kc_l, T, B, p, A[i], &C, &d);
+
+            printf("\n");
+        }
+
+        printf("Matrice A ottimizzata: \n");
+        mat_print_double(I, K, A);
+        printf("\n");
+
+        //Optimization with respect of B(t)
+        get_AIj(I, J, K, A, AIj);
+
+        for(int t=0; t<T; t++){
+            vectorize_P(I, J, t, mat, Pv); 
+            gen_ssq(I*J, K*J, K, AIj, Pv, Bv, &C_e, &d_e);
+
+            for(int k=0; k<K; k++){
+                for(int j=0; j<J; j++){
+                    B[t][j][k] = Bv[k*J + j];
+                }
+            }
+        }
+
+        for(int t=0; t<T; t++){
+            printf("Matrice B(%d) ottimizzata: \n", t+1);
+            mat_print_double(J, K, B[t]);
+            printf("\n");
+        }
+
+        iter += 1;
+    }
+
+    printf("No errore 4\n");
+    free_C(Kc, C); //! NON CANCELLARE!!!!!!!!!
+    free(d); //! NON CANCELLARE!!!!!!!!!
+    free_C(K, C_e); //! NON CANCELLARE!!!!!!!!!
+    free(d_e); //! NON CANCELLARE!!!!!!!!!
+
+    return;
+}
+
+// int main() {
+//     // int I = 4;
+//     // int J = 3;
+//     // int K = 3;
+//     // double Q[I][J], r[I], x_0[J], QtQi[J][J], lambda[K], x[J];
+
+//     // Q[0][0] = 11.0; Q[0][1] = 9.0; Q[0][2] = 3.0;
+//     // Q[1][0] = 5.0; Q[1][1] = 0.0; Q[1][2] = 4.0;
+//     // Q[2][0] = 7.0; Q[2][1] = 9.0; Q[2][2] = 9.0;
+//     // Q[3][0] = 1.0; Q[3][1] = 2.0; Q[3][2] = 3.0;
+//     // r[0] = 1.0; r[1] = 3.0; r[2] = 2.0; r[3] = 1.0; 
+
+//     // // Initialization of C and d
+//     // double **C;
+//     // double *d;
+//     // C = (double **)malloc(K * sizeof(double *)); 
+//     // for(int i=0; i<K; i++){ 
+//     //     C[i] = (double *)malloc(J * sizeof(double));     
+//     // } 
+//     // d = (double *)malloc(K * sizeof(double)); 
+//     // C[0][0] = 1.0; C[0][1] = 2.0; C[0][2] = 1.0; 
+//     // C[1][0] = 3.0; C[1][1] = 2.0; C[1][2] = 1.0;
+//     // C[2][0] = 1.0; C[2][1] = 4.0; C[2][2] = 7.0;
+//     // d[0] = 2; d[1] = 4; d[2] = 6; 
+
+//     int I = 2, J = 2, K = 1;
+//     double Q[I][J], r[I], x_0[J], QtQi[J][J], lambda[K], x[J];
+
+//     Q[0][0] = -1.0; Q[0][1] = 2.0; Q[1][0] = -3.0; Q[1][1] = 4.0; 
+//     r[0] = 3.0, r[1] = 5.0;
+
+//     double **C;
+//     double *d;
+
+//     C = (double **)malloc(K * sizeof(double *)); 
+//     for(int i=0; i<K; i++){ 
+//         C[i] = (double *)malloc(J * sizeof(double));     
+//     } 
+//     d = (double *)malloc(K * sizeof(double)); 
+//     C[0][0] = -2.0; C[0][1] = 2.0;
+//     d[0] = 3.0;
+
+//     gen_ssq(I, J, K, Q, r, x, C, d);
+
+//     //Free the memory
+//     free_C(K, C); //! NON CANCELLARE!!!!!!!!!
+//     free(d); //! NON CANCELLARE!!!!!!!!!
+//     return 0;
+// }
 
