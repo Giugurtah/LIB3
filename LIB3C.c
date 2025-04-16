@@ -234,6 +234,24 @@ double gini_impurity(int I, int J, int S[I], double** F){ //Function used to eva
     return N*(1-sumJ);
 }
 
+double gini_impurity_arr(int I, int J, int S[I], double F[I][J]){ //Function used to evaluate the gini impurity
+    double sumI, sumJ = 0.0;
+    double N = 0.0;
+    for(int j=0; j<J; j++){
+        for(int i=0; i<I; i++){
+            N += (double)S[i]*F[i][j];
+        }
+    }
+    for(int j=0; j<J; j++){
+        sumI = 0.0;
+        for(int i=0; i<I; i++){
+            sumI += (double)S[i]*F[i][j]/N;
+        }
+        sumJ += pow(sumI, 2);
+    }
+    return N*(1-sumJ);
+}
+
 double gini_impurity_twoing(int I, int J, int Sx[I], int Sy[J], int Sy_N[I], double** F){ //Function to evaluate the gini impurity in the twoing
     double sumI_1 = 0.0, sumI_0 = 0.0;
     double N = 0.0;
@@ -847,7 +865,6 @@ void mat_inv_NS(int J, double A[J][J], double Ai[J][J]){ //This function, given 
                 err += fabs(X_temp[i][j] - X[i][j]);
             }
         }
-        printf("L'errore è: %f\n", err);
 
         if(err < 0.00000005){
             for(int i=0; i<J; i++){
@@ -868,7 +885,7 @@ void mat_inv_NS(int J, double A[J][J], double Ai[J][J]){ //This function, given 
 
     for(int i=0; i<J; i++){
         for(int j=0; j<J; j++){
-            Ai[i][j] = X_temp[i][j];
+            Ai[i][j] = X[i][j];
         }
     }
     return;
@@ -883,13 +900,31 @@ int check_det(int J, double A[J][J]){ //This function, given A, returns its dete
         }
     }
     for(int i=0; i<J; i++){
-        for(int j=i+1; j<J; j++){
-            prop = A_aux[j][i]/A[i][i];
-            for(int k=0; k<J; k++){
-                A_aux[j][k] = (double)(A_aux[j][k] - A_aux[i][k]*prop);
+        if(A[i][i] != 0.0){
+            for(int j=i+1; j<J; j++){
+                prop = A_aux[j][i]/A[i][i];
+                for(int k=0; k<J; k++){
+                    A_aux[j][k] = (double)(A_aux[j][k] - A_aux[i][k]*prop);
+                }
+            }
+        } else {
+            for(int j=i+1; j<J; j++){
+                if(A[j][i] != 0.0){
+                    for(int k=0; k<J; k++){
+                        A_aux[i][k] = (double)(A_aux[i][k] + A_aux[j][k]);
+                    } 
+                    for(int j=i+1; j<J; j++){
+                        prop = A_aux[j][i]/A[i][i];
+                        for(int k=0; k<J; k++){
+                            A_aux[j][k] = (double)(A_aux[j][k] - A_aux[i][k]*prop);
+                        }
+                    }
+                    j=J;
+                }
             }
         }
     }
+
     for(int i=0; i<J; i++){
         det *= A_aux[i][i];
     }
@@ -903,16 +938,16 @@ int check_det(int J, double A[J][J]){ //This function, given A, returns its dete
     return 1;
 }
 
-void get_AIj(int I, int J, int K, double A[I][K], double AIj[I*J][K*J]){
-    for(int i=0; i<I*J; i++){
+void get_AIj(int I, int J, int K, double A[I][J], double AIj[I*K][J*K]){
+    for(int i=0; i<I*K; i++){
         for(int k=0; k<K*J; k++){
             AIj[i][k] = 0.0;
         }
     }
-    for(int j=0; j<J; j++){
+    for(int k=0; k<K; k++){
         for(int i=0; i<I; i++){
-            for(int k=0; k<K; k++){
-                AIj[I*j + i][K*j + k] = A[i][k];
+            for(int j=0; j<J; j++){
+                AIj[I*k + i][J*k + j] = A[i][j];
             }
         }
     }
@@ -946,13 +981,14 @@ void add_val_d(int K, double **d, double val){
 }
 
 void remove_row_C(int K, int J, int rem, double ***C){
-    for(int i=rem; i<K-1; i++){
-        for(int j=0; j<J; j++){
-            (*C)[i][j] = (*C)[i+1][j];
-        }
+    // Libera la memoria della riga da eliminare
+    free((*C)[rem]);
+
+    // Sposta i puntatori delle righe successive verso l'alto
+    for (int i = rem; i < K - 1; i++) {
+        (*C)[i] = (*C)[i + 1];
     }
 
-    //free(*C[K-1]);
     *C = (double **)realloc(*C, (K - 1) * sizeof(double *));
     return;
 }
@@ -962,6 +998,17 @@ void remove_val_d(int K, int rem, double **d){
         (*d)[i] = (*d)[i+1];
     }
     *d = (double *)realloc(*d, (K - 1) * sizeof(double));
+    return;
+}
+
+void reset_Cd(int K, int k_temp, double ***C, double **d){
+    for(int k=K; k<k_temp; k++){
+        free((*C)[k]);
+    }
+
+    *C = (double **)realloc(*C, K * sizeof(double *));
+    *d = (double *)realloc(*d, K  * sizeof(double));
+
     return;
 }
 
@@ -985,13 +1032,8 @@ void calc_x0(int I, int J, double Q[I][J], double QtQi[J][J], double r[I], doubl
     printf("Matrice QtQ:\n");
     mat_print_double(J,J,QtQ);
 
-    det = check_det(J, QtQ);
-    if(det == 0.0){
-        mat_inv_NS(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
-    } else {
-        mat_inv_GJ(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
-    }
-    
+    mat_inv_NS(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of Qt
+
     printf("\nMatrice QtQi:\n");
     mat_print_double(J,J,QtQi);
 
@@ -1048,11 +1090,8 @@ void calc_x0_exp(int I, int J, int T, double Q[T][I][J], double QtQi[J][J], doub
     mat_print_double(J,J,QtQ);
 
     det = check_det(J, QtQ);
-    if(det == 0.0){
-        mat_inv_NS(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
-    } else {
-        mat_inv_GJ(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
-    }
+    
+    mat_inv_NS(J, QtQ, QtQi); //QtQi is calculated as the inverted matrix of QtQ
 
     printf("\nMatrice QtQi:\n");
     mat_print_double(J,J,QtQi);
@@ -1080,28 +1119,39 @@ void calc_x0_exp(int I, int J, int T, double Q[T][I][J], double QtQi[J][J], doub
     return;
 }
 
-void calc_lamb(int K, int J, double QtQi[J][J], double **C, double *d, double x_0[J], double lambda[K]){ //This function evaluates Lambda
-    double Ct[J][K], CQtQi[K][J], CQtQiCt[K][K], CQtQiCti[K][K], Cx0[K], d_Cx0[K];
-    int det; 
+void calc_x0_block(int I, int J, double QtQiQt[J][I], double r[I], double x_0[J]){ //This function evaluates X0
+    prod_mat_vect(J, I, QtQiQt, r, x_0); // x_0 = (Q'Q)^(-1)Q'r
 
-    printf("\nVETTORE X_0 All'interno della funzione lambda: "); //!DA CANCELLARE
+    for(int i=0; i<J; i++){
+        x_0[i] = round_with_tolerance(x_0[i]);
+        if(x_0[i] == -0.0){
+            x_0[i] = 0.0;
+        }
+    }
+
+    printf("Array x_0: "); //!DA CANCELLARE
     for(int i=0; i<J; i++){ //!DA CANCELLARE
         printf("%f ", x_0[i]); //!DA CANCELLARE
     } //!DA CANCELLARE
     printf("\n"); //!DA CANCELLARE
+
+    return;
+}
+
+void calc_lamb(int K, int J, double QtQi[J][J], double **C, double *d, double x_0[J], double lambda[K]){ //This function evaluates Lambda
+    double Ct[J][K], CQtQi[K][J], CQtQiCt[K][K], CQtQiCti[K][K], Cx0[K], d_Cx0[K];
+    int det; 
     
     mat_tras_ptr(K, J, C, Ct); //Transpose of the matrix C
+
+    printf("La matrice Ct è:\n"); //!DA CANCELLARE
+    mat_print_double(J, K, Ct); //!DA CANCELLARE
 
     prod_matrix_ptr(K, J, J, C, QtQi, CQtQi); //Product of C and (Q'Q)^-1
 
     prod_matrix(K, J, K, CQtQi, Ct, CQtQiCt); //Product of CQtQiCt
 
-    det = check_det(K, CQtQiCt);
-    if(det == 0.0){
-        mat_inv_NS(K, CQtQiCt, CQtQiCti); //QtQi is calculated as the inverted matrix of QtQ
-    } else {
-        mat_inv_GJ(K, CQtQiCt, CQtQiCti); //QtQi is calculated as the inverted matrix of QtQ
-    }
+    mat_inv_NS(K, CQtQiCt, CQtQiCti); //QtQi is calculated as the inverted matrix of QtQ
 
     prod_mat_ptr_vect(K, J, C, x_0, Cx0); //Product of Cx_0
 
@@ -1109,19 +1159,69 @@ void calc_lamb(int K, int J, double QtQi[J][J], double **C, double *d, double x_
         d_Cx0[i] = d[i] - Cx0[i]; //Array of (d-Cx_0)
     }
 
-    printf("\nVETTORE X_0 dopo calcolato d_Cx0: "); //!DA CANCELLARE
-    for(int i=0; i<J; i++){ //!DA CANCELLARE
-        printf("%f ", x_0[i]); //!DA CANCELLARE
+    prod_mat_vect(K, K, CQtQiCti, d_Cx0, lambda); //lambda = (((C(Q'Q)^-1)C')^-1)(d-Cx_0)
+
+    for(int i=0; i<K; i++){
+        lambda[i] = round_with_tolerance(lambda[i]);
+        if(lambda[i] == -0.0){
+            lambda[i] = 0.0;
+        }
+    }
+
+    printf("Array lambda: ");  //!DA CANCELLARE
+    for(int i=0; i<K; i++){  //!DA CANCELLARE
+        printf("%f ", lambda[i]);  //!DA CANCELLARE
+    }  //!DA CANCELLARE
+    printf("\n");  //!DA CANCELLARE
+    return;
+}
+
+void re_calc_lamb(int K, int J, double QtQi[J][J], double **C, double *d, double x_0[J], double lambda[K]){ //This function evaluates Lambda
+    double Ct[J][K], CQtQi[K][J], CQtQiCt[K][K], CQtQiCti[K][K], Cx0[K], d_Cx0[K];
+    int det; 
+    
+    mat_tras_ptr(K, J, C, Ct); //Transpose of the matrix C
+
+    printf("La matrice Ct è:\n"); //!DA CANCELLARE
+    mat_print_double(J, K, Ct); //!DA CANCELLARE
+
+    prod_matrix_ptr(K, J, J, C, QtQi, CQtQi); //Product of C and (Q'Q)^-1
+
+    printf("La matrice QtQi è:\n"); //!DA CANCELLARE
+    mat_print_double(J, J, QtQi); //!DA CANCELLARE
+
+    printf("La matrice CQtQi è:\n"); //!DA CANCELLARE
+    mat_print_double(K, J, CQtQi); //!DA CANCELLARE
+
+    prod_matrix(K, J, K, CQtQi, Ct, CQtQiCt); //Product of CQtQiCt
+
+    printf("La matrice CQtQiCt è:\n"); //!DA CANCELLARE
+    mat_print_double(K, K, CQtQiCt); //!DA CANCELLARE
+
+    mat_inv_NS(K, CQtQiCt, CQtQiCti); //QtQi is calculated as the inverted matrix of QtQ
+
+    printf("La matrice CQtQiCti è:\n"); //!DA CANCELLARE
+    mat_print_double(K, K, CQtQiCti); //!DA CANCELLARE
+
+    prod_mat_ptr_vect(K, J, C, x_0, Cx0); //Product of Cx_0
+
+    printf("Il vettore Cx_0 è:\n"); //!DA CANCELLARE
+    for(int i=0; i<K; i++){ //!DA CANCELLARE
+        printf("%f ", Cx0[i]); //!DA CANCELLARE
+    } //!DA CANCELLARE
+    printf("\n"); //!DA CANCELLARE
+
+    for(int i=0; i<K; i++){
+        d_Cx0[i] = d[i] - Cx0[i]; //Array of (d-Cx_0)
+    }
+
+    printf("Il vettore d_Cx0 è:\n"); //!DA CANCELLARE
+    for(int i=0; i<K; i++){ //!DA CANCELLARE
+        printf("%f ", d_Cx0[i]); //!DA CANCELLARE
     } //!DA CANCELLARE
     printf("\n"); //!DA CANCELLARE
 
     prod_mat_vect(K, K, CQtQiCti, d_Cx0, lambda); //lambda = (((C(Q'Q)^-1)C')^-1)(d-Cx_0)
-
-    printf("\nVETTORE X_0 dopo calcolato lambda: "); //!DA CANCELLARE
-    for(int i=0; i<J; i++){ //!DA CANCELLARE
-        printf("%f ", x_0[i]); //!DA CANCELLARE
-    } //!DA CANCELLARE
-    printf("\n"); //!DA CANCELLARE
 
     for(int i=0; i<K; i++){
         lambda[i] = round_with_tolerance(lambda[i]);
@@ -1169,9 +1269,16 @@ void calc_x(int K, int J, double QtQi[J][J], double **C, double lambda[K], doubl
 
 void gen_ssq(int I, int J, int K, double Q[I][J], double r[I], double x[J], double ***C, double **d){ //This function, given [Q,r,C,d], performs the SSQ method and returns X
     int stop = 0, feasible, i_f, counter, k_temp = K; 
-    double add_array[J], QtQi[J][J], x_0[J], lambda[K], x_0_saved[J];
+    double add_array[J], QtQi[J][J], x_0[J], x_0_saved[J], lamb_min;
 
     printf("INIZIO SSQ METHOD:\n");
+
+    calc_x0(I, J, Q, QtQi, r, x_0);
+
+    for(int i=0; i<J; i++){
+        x_0_saved[i] = x_0[i];
+    }
+
     while(stop == 0){
         printf("INIZIO ITERAZIONE N.%d\n", stop+1);
         printf("Constraints C and d:\n");
@@ -1183,12 +1290,7 @@ void gen_ssq(int I, int J, int K, double Q[I][J], double r[I], double x[J], doub
             printf(" | %f\n", (*d)[i]);
         }
 
-        calc_x0(I, J, Q, QtQi, r, x_0);
-
-        for(int i=0; i<J; i++){
-            x_0_saved[i] = x_0[i];
-        }
-
+        double lambda[k_temp];
         calc_lamb(k_temp, J, QtQi, *C, *d, x_0, lambda);
 
         calc_x(k_temp, J, QtQi, *C, lambda, x_0_saved, x);
@@ -1219,15 +1321,16 @@ void gen_ssq(int I, int J, int K, double Q[I][J], double r[I], double x[J], doub
             printf("C and d updated\n\n");
         }
         if(feasible == 1){
-            printf("X FEASIBLE\n");
-            for(int i=J; i<K; i++){
-                if(lambda[i] < 0){
+            lamb_min = 0.0;
+            for(int i=K; i<k_temp; i++){
+                if(lambda[i] < lamb_min){
                     i_f = i;
-                    feasible = 0;
+                    lamb_min = lambda[i];
                 }
             }
-            if(feasible == 0){
+            if(lamb_min < 0){
                 printf("LAMBDA NON FEASIBLE\n");
+                feasible = 0;
                 remove_row_C(k_temp, J, i_f, C);
                 remove_val_d(k_temp, i_f, d);
                 k_temp -= 1;
@@ -1239,20 +1342,20 @@ void gen_ssq(int I, int J, int K, double Q[I][J], double r[I], double x[J], doub
         }
         getchar();
     }
-    while(k_temp != K){
-        printf("Err 1\n");
-        remove_row_C(k_temp, K, J, C);
-        printf("Err 2\n");
-        remove_val_d(k_temp, K, d);
-        k_temp -= 1;       
-    }
+    reset_Cd(K, k_temp, C, d);
 }
 
 void gen_ssq_exp(int I, int J, int K, int T, double Q[T][I][J], double r[T][I], double x[J], double ***C, double **d){
     int stop = 0, feasible, i_f, counter, k_temp = K; 
-    double add_array[J], QtQi[J][J], x_0[J], lambda[K];
+    double add_array[J], QtQi[J][J], x_0[J], x_0_saved[J], lamb_min;
 
     printf("INIZIO SSQ METHOD:\n");
+    calc_x0_exp(I, J, T, Q, QtQi, r, x_0);
+
+    for(int i=0; i<J; i++){
+        x_0_saved[i] = x_0[i];
+    }
+
     while(stop == 0){
         printf("INIZIO ITERAZIONE N.%d\n", stop+1);
         printf("Constraints C and d:\n");
@@ -1264,9 +1367,9 @@ void gen_ssq_exp(int I, int J, int K, int T, double Q[T][I][J], double r[T][I], 
             printf(" | %f\n", (*d)[i]);
         }
 
-        calc_x0_exp(I, J, T, Q, QtQi, r, x_0);
+        double lambda[k_temp];
         calc_lamb(k_temp, J, QtQi, *C, *d, x_0, lambda);
-        calc_x(k_temp, J, QtQi, *C, lambda, x_0, x);
+        calc_x(k_temp, J, QtQi, *C, lambda, x_0_saved, x);
 
         counter = 0;
         feasible = 1;
@@ -1295,14 +1398,17 @@ void gen_ssq_exp(int I, int J, int K, int T, double Q[T][I][J], double r[T][I], 
         }
         if(feasible == 1){
             printf("X FEASIBLE\n");
-            for(int i=J; i<K; i++){
-                if(lambda[i] < 0){
+            lamb_min = 0.0;
+            for(int i=K; i<k_temp; i++){
+                if(lambda[i] < lamb_min){
                     i_f = i;
+                    lamb_min = lambda[i];
                     feasible = 0;
                 }
             }
-            if(feasible == 0){
-                printf("LAMBDA NON FEASIBLE\n");
+            if(lamb_min < 0){
+                printf("LAMBDA NON FEASIBLE. Nella posizione: %d\n", i_f);
+                feasible = 0;
                 remove_row_C(k_temp, J, i_f, C);
                 remove_val_d(k_temp, i_f, d);
                 k_temp -= 1;
@@ -1312,74 +1418,161 @@ void gen_ssq_exp(int I, int J, int K, int T, double Q[T][I][J], double r[T][I], 
             printf("LAMBDA FEASIBLE\n");
             stop = 1;
         }
-        getchar();
+        if(k_temp > K+J){
+            abort();
+        }
+        //getchar();
     }
-    while(k_temp != K){
-        remove_row_C(k_temp, K, J, C);
-        remove_val_d(k_temp, K, d);
-        k_temp -= 1;       
+    reset_Cd(K, k_temp, C, d);
+}
+
+void gen_ssq_block(int I, int J, int K, double l_Q[I][K], double r[I*J], double x[J*K], double ***C, double **d){
+    double l_Qt[K][I], l_QtQ[K][K], l_QtQi[K][K], l_QtQiQt[K][I];
+    double QtQi[K*J][K*J], QtQiQt[K*J][I*J];
+    double x_0[J*K], x0_saved[J*K];
+
+    int stop = 0, feasible, i_f, counter, det, k_temp = K; 
+    double add_array[K*J], min;
+
+    int lamb_nan = 0; //!DA CANCELLARE
+
+    mat_tras(I, K, l_Q, l_Qt);
+    prod_matrix(K, I, K, l_Qt, l_Q, l_QtQ);
+
+    mat_inv_NS(K, l_QtQ, l_QtQi);
+
+    prod_matrix(K, K, I, l_QtQi, l_Qt, l_QtQiQt);
+
+    get_AIj(K, K, J, l_QtQi, QtQi);
+    get_AIj(K, I, J, l_QtQiQt, QtQiQt);
+
+    calc_x0_block(K*I, K*J, QtQiQt, r, x_0);
+    for(int i=0; i<K*J; i++){
+        x0_saved[i] = x_0[i];
     }
+
+    while(stop == 0){
+        printf("INIZIO ITERAZIONE\n");
+        printf("Constraints C and d:\n");
+        printf("K: %d\n", k_temp);
+        for(int i=0; i<k_temp; i++){
+            for(int j=0; j<K*J; j++){
+                printf("%f ", (*C)[i][j]);
+            }
+            printf(" | %f\n", (*d)[i]);
+        }
+
+        double lambda[k_temp];
+        re_calc_lamb(k_temp, K*J, QtQi, *C, *d, x_0, lambda);
+
+        calc_x(k_temp, K*J, QtQi, *C, lambda, x0_saved, x);
+
+        counter = 0;
+        feasible = 1;
+        min = 0.0;
+
+        //!DEBUGGING DA CANCELLARE (NON TUTTO) QUANDO FIXED
+        //? Controllare se i primi K valori di X sono feasible
+        for(int i=0; i<K; i++){
+            if(x[i] < min){
+                feasible = 0;
+                min = x[i];
+                i_f = i;
+            }
+        }
+
+        //? Se i primi K valori sono feasible si controllano gli altri, preferendo gli indici i quali x_0 non è nullo
+        if(feasible == 1){
+            for(int i=K; i<K*J; i++){
+                if(x[i] < min && x0_saved[i] != 0.0){
+                    feasible = 0;
+                    min = x[i];
+                    i_f = i;
+                }
+            }
+        }
+
+        //? Se risulta che x è feasible si controlla se ci sono x[i] non feasible tali che x_0[i] è nullo
+        if(feasible == 1){
+            for(int i=K; i<K*J; i++){
+                if(x[i] < min){
+                    feasible = 0;
+                    min = x[i];
+                    i_f = i;
+                }
+            }
+            if(feasible == 0){
+                printf("C'è un x non feasible ma non è coerente con x0\n");
+            }
+        }
+
+        //? Se x non è ancora feasible si controlla se il vincolo non è stato già aggiunto (il che implica siamo in loop)
+        if(feasible == 0){
+            for(int j=K; j<k_temp; j++){
+                if((*C)[j][i_f] == 1.0){
+                    feasible = 2;
+                }
+            }
+        }
+
+        if(feasible == 2){
+            printf("\nL'esecuzione è in loop\n");
+            abort();
+        }
+        //!FINE DEBUGGING DA CANCELLARE
+
+        if(feasible == 0){
+            printf("X NON FEASIBLE\n");
+            for(int i=0; i<i_f; i++){
+                add_array[i] = 0.0;
+            }
+            add_array[i_f] = 1.0;
+            for(int i=i_f+1; i<K*J; i++){
+                add_array[i] = 0.0;
+            }
+
+            add_row_C(k_temp, K*J, C, add_array);
+            add_val_d(k_temp, d, 0.0);
+            k_temp += 1;
+            printf("C and d updated\n\n");
+        }
+        if(feasible == 1){
+            printf("X FEASIBLE\n");
+            min = 0.0;
+            for(int i=K; i<k_temp; i++){
+                if(lambda[i] < min){
+                    i_f = i;
+                    min = lambda[i];
+                }
+            }
+            if(min < 0){
+                printf("LAMBDA NON FEASIBLE. All'indice: %d\n", i_f);
+                feasible = 0;
+                remove_row_C(k_temp, J, i_f, C);
+                remove_val_d(k_temp, i_f, d);
+                k_temp -= 1;
+            }
+        }
+        if(feasible == 1){
+            printf("LAMBDA FEASIBLE\n");
+            stop = 1;
+        }
+        //getchar();
+        if(k_temp > K+K*J){
+            abort();
+        }
+    }
+    reset_Cd(K, k_temp, C, d);
 }
 
 //Functions called by Python
-void omo1_slba_c(int J, int I, int T, double ***mat){
-    //First step: Minimizing with respect to the mixing parameters
-    printf("Inzio esecuzione in C");
-    int K = 3;
-    int t = 0;
-    int Kc = 1, Kc_l;
-    double randmat[J][K], B[J][K], ai[K], p[J], A[I][K];
-    mat_rand(J, K, randmat);
-    conv_ZB(J, K, randmat, B);
-
-    printf("No errore 1\n");
-    double **C;
-    double *d;
-
-    C = (double **)malloc(Kc * sizeof(double *)); 
-    for(int i=0; i<K; i++){ 
-        C[i] = (double *)malloc(K * sizeof(double));     
-    } 
-    d = (double *)malloc(Kc * sizeof(double)); 
-    C[0][0] = 1.0; C[0][1] = 1.0; C[0][2] = 1.0;
-    d[0] = 1.0;
-
-    printf("No errore 2\n");
-    for(int i=0; i<I; i++){
-        Kc_l = Kc;
-        for(int j=0; j<J; j++){
-            p[j] = mat[j][i][t];
-        }
-        printf("No errore 3\n");
-        gen_ssq(J, K, Kc_l, B, p, ai, &C, &d);
-        for(int k=0; k<K; k++){
-            A[i][k] = ai[k];
-        }
-        while(Kc_l != Kc){
-            remove_row_C(Kc_l, K, Kc, &C);
-            remove_val_d(Kc_l, Kc, &d);
-            Kc_l -= 1;
-        }
-        printf("\n");
-    }
-
-    printf("Matrice A ottimizzata: \n");
-    mat_print_double(I, K, A);
-    printf("\n");
-
-    printf("No errore 4\n");
-    free_C(Kc, C); //! NON CANCELLARE!!!!!!!!!
-    free(d); //! NON CANCELLARE!!!!!!!!!
-    return;
-}
-
 void slba_omogen_A(int J, int I, int T, double ***mat){
     //First step: Minimizing with respect to the mixing parameters
     srand(time(NULL));
     printf("Inzio esecuzione in C slba omogen\n");
     int K = 3, Ke = K*J;
     int Kc = 1, Kc_l;
-    int iter = 0, MAX_ITER=1;
+    int iter = 0, MAX_ITER=15;
     double randmat[J][K], B[T][J][K], p[T][J], A[I][K], AIj[I*J][K*J], Bv[J*K], Pv[I*J], arr[Ke];
 
     for(int t=0; t<T; t++){
@@ -1437,23 +1630,19 @@ void slba_omogen_A(int J, int I, int T, double ***mat){
                     p[t][j] = mat[j][i][t];
                 }
             }
-
             printf("No errore 3\n");
             gen_ssq_exp(J, K, Kc_l, T, B, p, A[i], &C, &d);
 
             printf("\n");
         }
 
-        printf("Matrice A ottimizzata: \n");
-        mat_print_double(I, K, A);
-        printf("\n");
-
-        //Optimization with respect of B(t)
-        get_AIj(I, J, K, A, AIj);
-
         for(int t=0; t<T; t++){
+            printf("Matrice A ottimizzata: \n");
+            mat_print_double(I, K, A);
+            printf("\n");
+
             vectorize_P(I, J, t, mat, Pv); 
-            gen_ssq(I*J, K*J, K, AIj, Pv, Bv, &C_e, &d_e);
+            gen_ssq_block(I, J, K, A, Pv, Bv, &C_e, &d_e);
 
             for(int k=0; k<K; k++){
                 for(int j=0; j<J; j++){
@@ -1467,7 +1656,7 @@ void slba_omogen_A(int J, int I, int T, double ***mat){
             mat_print_double(J, K, B[t]);
             printf("\n");
         }
-
+        getchar();
         iter += 1;
     }
 
@@ -1480,53 +1669,824 @@ void slba_omogen_A(int J, int I, int T, double ***mat){
     return;
 }
 
-// int main() {
-//     // int I = 4;
-//     // int J = 3;
-//     // int K = 3;
-//     // double Q[I][J], r[I], x_0[J], QtQi[J][J], lambda[K], x[J];
+//Gradient Descent
+void slba_NoC_execute(int I, int J, int T, double ***mat, double ***alpha, double ***beta){ //Unconstrained Simultaneous Latent Budget Analysis 
+    int K=2, iter_count=0, MAX_ITER = 100000, stop=0;
+    double r = 1, d_stop = 0.000000000001, f_stop=0.005, sum;
+    double f=0, f_p, d;
 
-//     // Q[0][0] = 11.0; Q[0][1] = 9.0; Q[0][2] = 3.0;
-//     // Q[1][0] = 5.0; Q[1][1] = 0.0; Q[1][2] = 4.0;
-//     // Q[2][0] = 7.0; Q[2][1] = 9.0; Q[2][2] = 9.0;
-//     // Q[3][0] = 1.0; Q[3][1] = 2.0; Q[3][2] = 3.0;
-//     // r[0] = 1.0; r[1] = 3.0; r[2] = 2.0; r[3] = 1.0; 
+    double A[T][I][K], B[T][J][K], At[T][K][I], Bt[T][K][J], df_dA[T][I][K], df_dB[T][J][K]; 
+    double U[T][I][K], Z[T][J][K], df_dU[T][I][K], df_dZ[T][J][K];
 
-//     // // Initialization of C and d
-//     // double **C;
-//     // double *d;
-//     // C = (double **)malloc(K * sizeof(double *)); 
-//     // for(int i=0; i<K; i++){ 
-//     //     C[i] = (double *)malloc(J * sizeof(double));     
-//     // } 
-//     // d = (double *)malloc(K * sizeof(double)); 
-//     // C[0][0] = 1.0; C[0][1] = 2.0; C[0][2] = 1.0; 
-//     // C[1][0] = 3.0; C[1][1] = 2.0; C[1][2] = 1.0;
-//     // C[2][0] = 1.0; C[2][1] = 4.0; C[2][2] = 7.0;
-//     // d[0] = 2; d[1] = 4; d[2] = 6; 
+    double Ft[T][J][I], DX[T][I][I];
+    double FB[I][K], BtB[K][K], ABtB[I][K], DXABtB[I][K]; //Used to calculate df_dA
+    double FtA[J][K], DXA[I][K], AtDXA[K][K], BAtDXA[J][K]; //Used to calculate df_dB
+    double ABt[I][J], FtABt[J][J], DXABt[I][J], AtDXABt[K][J], BAtDXABt[J][J];
 
-//     int I = 2, J = 2, K = 1;
-//     double Q[I][J], r[I], x_0[J], QtQi[J][J], lambda[K], x[J];
+    // Initialization of U and Z, consequently of A and B
+    for(int t=0; t<T; t++){
+        mat_rand(I, K, U[t]);
+        mat_rand(J, K, Z[t]);
+    }
 
-//     Q[0][0] = -1.0; Q[0][1] = 2.0; Q[1][0] = -3.0; Q[1][1] = 4.0; 
-//     r[0] = 3.0, r[1] = 5.0;
+    // initialization of the transpose of F
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            for(int j=0; j<J; j++){
+                Ft[t][j][i] = mat[t][i][j];
+            }
+        }
+    }
 
-//     double **C;
-//     double *d;
+    // Initialization of DX
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            sum = 0.0;
+            for(int j=0; j<J; j++){
+                sum += mat[t][i][j];
+                DX[t][i][j] = 0.0;
+            }
+            DX[t][i][i] = sum;
+        }
+    }
 
-//     C = (double **)malloc(K * sizeof(double *)); 
-//     for(int i=0; i<K; i++){ 
-//         C[i] = (double *)malloc(J * sizeof(double));     
-//     } 
-//     d = (double *)malloc(K * sizeof(double)); 
-//     C[0][0] = -2.0; C[0][1] = 2.0;
-//     d[0] = 3.0;
+    // Iterative execution begins
+    while(stop == 0 && iter_count < MAX_ITER){
+        f_p = f;
+        f = 1;
 
-//     gen_ssq(I, J, K, Q, r, x, C, d);
+        for(int t=0; t<T; t++){
+            conv_UA(I, K, U[t], A[t]);
+            conv_ZB(J, K, Z[t], B[t]);
+        }
 
-//     //Free the memory
-//     free_C(K, C); //! NON CANCELLARE!!!!!!!!!
-//     free(d); //! NON CANCELLARE!!!!!!!!!
-//     return 0;
-// }
+        // Initialization of df_dA and df_dB
+        for(int t=0; t<T; t++){
+            for(int k=0; k<K; k++){
+                for(int i=0; i<I; i++){
+                    df_dA[t][i][k] = 0.0;
+                }
+                for(int j=0; j<J; j++){
+                    df_dB[t][j][k] = 0.0;
+                }
+            }
+        }
 
+        for (int t=0; t<T; t++){
+            // Calc f
+            mat_tras(J, K, B[t], Bt[t]);
+            prod_matrix(I, K, J, A[t], Bt[t], ABt);
+            prod_matrix(J, I, J, Ft[t], ABt, FtABt);
+            f -= 2.0*calc_tr(J, FtABt);
+
+            mat_tras(I, K, A[t], At[t]);
+            prod_matrix(I, K, J, A[t], Bt[t], ABt);
+            prod_matrix(I, I, J, DX[t], ABt, DXABt);
+            prod_matrix(K, I, J, At[t], DXABt, AtDXABt);
+            prod_matrix(J, K, J, B[t], AtDXABt, BAtDXABt);
+            f += calc_tr(J, BAtDXABt);
+
+            // df_dA
+            prod_matrix_ptr(I, J, K, mat[t], B[t], FB);
+            prod_matrix(K, J, K, Bt[t], B[t], BtB);
+            prod_matrix(I, K, K, A[t], BtB, ABtB);
+            prod_matrix(I, I, K, DX[t], ABtB, DXABtB);
+            
+            for(int i=0; i<I; i++){
+                for(int k=0; k<K; k++){
+                    df_dA[t][i][k] += 2.0*DXABtB[i][k] - 2.0*FB[i][k];
+                }
+            }
+
+            // df_dB
+            prod_matrix(J, I, K, Ft[t], A[t], FtA);
+            prod_matrix(I, I, K, DX[t], A[t], DXA);
+            prod_matrix(K, I, K, At[t], DXA, AtDXA);
+            prod_matrix(J, K, K, B[t], AtDXA, BAtDXA);
+            
+            for(int j=0; j<J; j++){
+                for(int k=0; k<K; k++){
+                    df_dB[t][j][k] += 2.0*BAtDXA[j][k] - 2.0*FtA[j][k];
+                }
+            }
+        }
+
+        // Using df_dA and df_dB, df_dU and df_dZ are calculated and used to update U and Z
+        for(int t=0; t<T; t++){
+            conv_df_dU(I, K, df_dA[t], A[t], df_dU[t]);
+            update_UZ(I, K, r, U[t], df_dU[t]);
+            conv_df_dZ(J, K, df_dB[t], B[t], df_dZ[t]);
+            update_UZ(J, K, r, Z[t], df_dZ[t]);
+        }
+
+        iter_count++;
+        d = f_p - f;
+
+        stop = 1;
+        for(int k=0; k<K; k++){
+            for(int t=0; t<T; t++){
+                for(int i=0; i<I; i++){
+                    if(fabs(df_dU[t][i][k]) > 0.0000000001){
+                        stop = 0;
+                    }
+                }
+                for(int j=0; j<J; j++){
+                    if(fabs(df_dZ[t][j][k]) > 0.0000000001){
+                        stop = 0;
+                    }
+                }
+            }
+        }
+
+        if((fabs(d))<d_stop||f<f_stop){
+            stop = 1;
+        }
+    }
+
+    printf("Calcolo terminato valore f finale: %f. ", f);
+
+    for(int t=0; t<T; t++){
+        for(int k=0; k<K; k++){
+            for(int i=0; i<I; i++){
+                alpha[t][i][k] = A[t][i][k];
+            }
+            for(int j=0; j<J; j++){
+                beta[t][j][k] = B[t][j][k];
+            }
+        }
+    }
+}
+void slba_A_execute(int I, int J, int T, double ***mat, double **alpha, double ***beta){ //Homogeneity for the mixing parameters constrained SLBA
+    int K=2, iter_count=0, MAX_ITER = 100000, stop=0;
+    double r = 1, d_stop = 0.000000000001, f_stop=0.005, sum;
+    double f=0, f_p, d;
+
+    double A[I][K], B[T][J][K], At[K][I], Bt[T][K][J], df_dA[I][K], df_dB[T][J][K]; 
+    double U[I][K], Z[T][J][K], df_dU[I][K], df_dZ[T][J][K];
+    double Ft[T][J][I], DX[T][I][I];
+    double FB[I][K], BtB[K][K], ABtB[I][K], DXABtB[I][K]; //Used to calculate df_dA
+    double FtA[J][K], DXA[I][K], AtDXA[K][K], BAtDXA[J][K]; //Used to calculate df_dB
+    double ABt[I][J], FtABt[J][J], DXABt[I][J], AtDXABt[K][J], BAtDXABt[J][J];
+
+    // Initialization of U and Z, consequently of A and B
+    mat_rand(I, K, U);
+    for(int t=0; t<T; t++){
+        mat_rand(J, K, Z[t]);
+    }
+
+    // initialization of the transpose of F
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            for(int j=0; j<J; j++){
+                Ft[t][j][i] = mat[t][i][j];
+            }
+        }
+    }
+
+    // Initialization of DX
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            sum = 0.0;
+            for(int j=0; j<J; j++){
+                sum += mat[t][i][j];
+                DX[t][i][j] = 0.0;
+            }
+            DX[t][i][i] = sum;
+        }
+    }
+
+    // Iterative execution begins
+    while(stop == 0 && iter_count < MAX_ITER){
+        f_p = f;
+        f = 1;
+
+        conv_UA(I, K, U, A);
+        for(int t=0; t<T; t++){
+            conv_ZB(J, K, Z[t], B[t]);
+        }
+
+        // Initialization of df_dA and df_dB
+        for(int i=0; i<I; i++){
+            for(int k=0; k<K; k++){
+                df_dA[i][k] = 0.0;
+            }
+        }
+        for(int t=0; t<T; t++){
+            for(int j=0; j<J; j++){
+                for(int k=0; k<K; k++){
+                    df_dB[t][j][k] = 0.0;
+                }
+            }
+        }
+
+        for (int t=0; t<T; t++){
+            // Calc f
+            mat_tras(J, K, B[t], Bt[t]);
+            prod_matrix(I, K, J, A, Bt[t], ABt);
+            prod_matrix(J, I, J, Ft[t], ABt, FtABt);
+            f -= 2.0*calc_tr(J, FtABt);
+
+            mat_tras(I, K, A, At);
+            prod_matrix(I, K, J, A, Bt[t], ABt);
+            prod_matrix(I, I, J, DX[t], ABt, DXABt);
+            prod_matrix(K, I, J, At, DXABt, AtDXABt);
+            prod_matrix(J, K, J, B[t], AtDXABt, BAtDXABt);
+            f += calc_tr(J, BAtDXABt);
+
+            // df_dA
+            prod_matrix_ptr(I, J, K, mat[t], B[t], FB);
+            prod_matrix(K, J, K, Bt[t], B[t], BtB);
+            prod_matrix(I, K, K, A, BtB, ABtB);
+            prod_matrix(I, I, K, DX[t], ABtB, DXABtB);
+            
+            for(int i=0; i<I; i++){
+                for(int k=0; k<K; k++){
+                    df_dA[i][k] += 2.0*DXABtB[i][k] - 2.0*FB[i][k];
+                }
+            }
+
+            // df_dB
+            prod_matrix(J, I, K, Ft[t], A, FtA);
+            prod_matrix(I, I, K, DX[t], A, DXA);
+            prod_matrix(K, I, K, At, DXA, AtDXA);
+            prod_matrix(J, K, K, B[t], AtDXA, BAtDXA);
+            
+            for(int j=0; j<J; j++){
+                for(int k=0; k<K; k++){
+                    df_dB[t][j][k] += 2.0*BAtDXA[j][k] - 2.0*FtA[j][k];
+                }
+            }
+        }
+
+        // Using df_dA and df_dB, df_dU and df_dZ are calculated and used to update U and Z
+        conv_df_dU(I, K, df_dA, A, df_dU);
+        update_UZ(I, K, r, U, df_dU);
+
+        for(int t=0; t<T; t++){
+            conv_df_dZ(J, K, df_dB[t], B[t], df_dZ[t]);
+            update_UZ(J, K, r, Z[t], df_dZ[t]);
+        }
+
+        iter_count++;
+        d = f_p - f;
+
+        stop = 1;
+        for(int k=0; k<K; k++){
+            for(int t=0; t<T; t++){
+                for(int j=0; j<J; j++){
+                    if(fabs(df_dZ[t][j][k]) > 0.0000000001){
+                        stop = 0;
+                    }
+            }
+            }
+            for(int i=0; i<I; i++){
+                if(fabs(df_dU[i][k]) > 0.00001){
+                    stop = 0;
+                }
+            }
+        }
+
+        if((fabs(d))<d_stop||f<f_stop){
+            stop = 1;
+        }
+
+    }
+
+    printf("Calcolo terminato valore f finale: %f. ", f);
+
+    for(int t=0; t<T; t++){
+        for(int k=0; k<K; k++){
+            for(int j=0; j<J; j++){
+                beta[t][j][k] = B[t][j][k];
+            }
+        }
+    }
+    for(int k=0; k<K; k++){
+        for(int i=0; i<I; i++){
+            alpha[i][k] = A[i][k];
+        }
+    }
+}
+void slba_B_execute(int I, int J, int T, double ***mat, double ***alpha, double **beta){ //Homogeneity for the latent budgets parameters constrained SLBA
+    int K=2, iter_count=0, MAX_ITER = 100000, stop=0;
+    double r = 1, d_stop = 0.000000000001, f_stop=0.005, sum;
+    double f=0, f_p, d;
+
+    double A[T][I][K], B[J][K], At[T][K][I], Bt[K][J], df_dA[T][I][K], df_dB[J][K]; 
+    double U[T][I][K], Z[J][K], df_dU[T][I][K], df_dZ[J][K];
+
+    double Ft[T][J][I], DX[T][I][I];
+    double FB[I][K], BtB[K][K], ABtB[I][K], DXABtB[I][K]; //Used to calculate df_dA
+    double FtA[J][K], DXA[I][K], AtDXA[K][K], BAtDXA[J][K]; //Used to calculate df_dB
+    double ABt[I][J], FtABt[J][J], DXABt[I][J], AtDXABt[K][J], BAtDXABt[J][J];
+
+    // Initialization of U and Z, consequently of A and B
+    mat_rand(J, K, Z);
+    for(int t=0; t<T; t++){
+        mat_rand(I, K, U[t]);
+    }
+
+    // initialization of the transpose of F
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            for(int j=0; j<J; j++){
+                Ft[t][j][i] = mat[t][i][j];
+            }
+        }
+    }
+
+    // Initialization of DX
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            sum = 0.0;
+            for(int j=0; j<J; j++){
+                sum += mat[t][i][j];
+                DX[t][i][j] = 0.0;
+            }
+            DX[t][i][i] = sum;
+        }
+    }
+
+    // Iterative execution begins
+    while(stop == 0 && iter_count < MAX_ITER){
+        f_p = f;
+        f = 1;
+
+        conv_ZB(J, K, Z, B);
+        for(int t=0; t<T; t++){
+            conv_UA(I, K, U[t], A[t]);
+        }
+
+        // Initialization of df_dA and df_dB
+        for(int j=0; j<J; j++){
+            for(int k=0; k<K; k++){
+                df_dB[j][k] = 0.0;
+            }
+        }
+        for(int t=0; t<T; t++){
+            for(int i=0; i<I; i++){
+                for(int k=0; k<K; k++){
+                    df_dA[t][i][k] = 0.0;
+                }
+            }
+        }
+
+        for (int t=0; t<T; t++){
+            // Calc f
+            mat_tras(J, K, B, Bt);
+            prod_matrix(I, K, J, A[t], Bt, ABt);
+            prod_matrix(J, I, J, Ft[t], ABt, FtABt);
+            f -= 2.0*calc_tr(J, FtABt);
+
+            mat_tras(I, K, A[t], At[t]);
+            prod_matrix(I, K, J, A[t], Bt, ABt);
+            prod_matrix(I, I, J, DX[t], ABt, DXABt);
+            prod_matrix(K, I, J, At[t], DXABt, AtDXABt);
+            prod_matrix(J, K, J, B, AtDXABt, BAtDXABt);
+            f += calc_tr(J, BAtDXABt);
+
+            // df_dA
+            prod_matrix_ptr(I, J, K, mat[t], B, FB);
+            prod_matrix(K, J, K, Bt, B, BtB);
+            prod_matrix(I, K, K, A[t], BtB, ABtB);
+            prod_matrix(I, I, K, DX[t], ABtB, DXABtB);
+            
+            for(int i=0; i<I; i++){
+                for(int k=0; k<K; k++){
+                    df_dA[t][i][k] += 2.0*DXABtB[i][k] - 2.0*FB[i][k];
+                }
+            }
+
+            // df_dB
+            prod_matrix(J, I, K, Ft[t], A[t], FtA);
+            prod_matrix(I, I, K, DX[t], A[t], DXA);
+            prod_matrix(K, I, K, At[t], DXA, AtDXA);
+            prod_matrix(J, K, K, B, AtDXA, BAtDXA);
+            
+            for(int j=0; j<J; j++){
+                for(int k=0; k<K; k++){
+                    df_dB[j][k] += 2.0*BAtDXA[j][k] - 2.0*FtA[j][k];
+                }
+            }
+        }
+
+        // Using df_dA and df_dB, df_dU and df_dZ are calculated and used to update U and Z
+        conv_df_dZ(J, K, df_dB, B, df_dZ);
+        update_UZ(J, K, r, Z, df_dZ);
+
+        for(int t=0; t<T; t++){
+            conv_df_dU(I, K, df_dA[t], A[t], df_dU[t]);
+            update_UZ(I, K, r, U[t], df_dU[t]);
+        }
+
+        iter_count++;
+        d = f_p - f;
+
+        stop = 1;
+        for(int k=0; k<K; k++){
+            for(int t=0; t<T; t++){
+                for(int i=0; i<I; i++){
+                    if(fabs(df_dU[t][i][k]) > 0.0000000001){
+                        stop = 0;
+                    }
+            }
+        }
+            for(int j=0; j<J; j++){
+                if(fabs(df_dZ[j][k]) > 0.0000000001){
+                    stop = 0;
+                }
+            }
+        }
+        if((fabs(d))<d_stop||f<f_stop){
+            stop = 1;
+        }
+    }
+    printf("Calcolo terminato valore f finale: %f. ", f);
+    for(int t=0; t<T; t++){
+        for(int k=0; k<K; k++){
+            for(int i=0; i<I; i++){
+                alpha[t][i][k] = A[t][i][k];
+            }
+        }
+    }
+    for(int k=0; k<K; k++){
+        for(int j=0; j<J; j++){
+            beta[j][k] = B[j][k];
+        }
+    }
+}
+void slba_AB_execute(int I, int J, int T, double ***mat, double **alpha, double **beta){ //Homogeneity for the latent busget structure constraied SLBA
+    int K=2, iter_count=0, MAX_ITER = 100000, stop=0;
+    double r = 1, d_stop = 0.000000000001, f_stop=0.005, sum;
+    double f=0, f_p, d;
+
+    double A[I][K], B[J][K], At[K][I], Bt[K][J], df_dA[I][K], df_dB[J][K]; 
+    double U[I][K], Z[J][K], df_dU[I][K], df_dZ[J][K];
+
+    double Ft[T][J][I], DX[T][I][I];
+    double FB[I][K], BtB[K][K], ABtB[I][K], DXABtB[I][K]; //Used to calculate df_dA
+    double FtA[J][K], DXA[I][K], AtDXA[K][K], BAtDXA[J][K]; //Used to calculate df_dB
+    double ABt[I][J], FtABt[J][J], DXABt[I][J], AtDXABt[K][J], BAtDXABt[J][J];
+
+    // Initialization of U and Z, consequently of A and B
+    mat_rand(J, K, Z);
+    mat_rand(I, K, U);
+
+
+    // initialization of the transpose of F
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            for(int j=0; j<J; j++){
+                Ft[t][j][i] = mat[t][i][j];
+            }
+        }
+    }
+
+    // Initialization of DX
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            sum = 0.0;
+            for(int j=0; j<J; j++){
+                sum += mat[t][i][j];
+                DX[t][i][j] = 0.0;
+            }
+            DX[t][i][i] = sum;
+        }
+    }
+
+    // Iterative execution begins
+    while(stop == 0 && iter_count < MAX_ITER){
+        f_p = f;
+        f = 1;
+
+        conv_ZB(J, K, Z, B);
+        conv_UA(I, K, U, A);
+
+        // Initialization of df_dA and df_dB
+        for(int j=0; j<J; j++){
+            for(int k=0; k<K; k++){
+                df_dB[j][k] = 0.0;
+            }
+        }
+
+        for(int i=0; i<I; i++){
+            for(int k=0; k<K; k++){
+                df_dA[i][k] = 0.0;
+            }            
+        }
+       
+        for (int t=0; t<T; t++){
+            // Calc f
+            mat_tras(J, K, B, Bt);
+            prod_matrix(I, K, J, A, Bt, ABt);
+            prod_matrix(J, I, J, Ft[t], ABt, FtABt);
+            f -= 2.0*calc_tr(J, FtABt);
+
+            mat_tras(I, K, A, At);
+            prod_matrix(I, K, J, A, Bt, ABt);
+            prod_matrix(I, I, J, DX[t], ABt, DXABt);
+            prod_matrix(K, I, J, At, DXABt, AtDXABt);
+            prod_matrix(J, K, J, B, AtDXABt, BAtDXABt);
+            f += calc_tr(J, BAtDXABt);
+
+            // df_dA
+            prod_matrix_ptr(I, J, K, mat[t], B, FB);
+            prod_matrix(K, J, K, Bt, B, BtB);
+            prod_matrix(I, K, K, A, BtB, ABtB);
+            prod_matrix(I, I, K, DX[t], ABtB, DXABtB);
+            
+            for(int i=0; i<I; i++){
+                for(int k=0; k<K; k++){
+                    df_dA[i][k] += 2.0*DXABtB[i][k] - 2.0*FB[i][k];
+                }
+            }
+
+            // df_dB
+            prod_matrix(J, I, K, Ft[t], A, FtA);
+            prod_matrix(I, I, K, DX[t], A, DXA);
+            prod_matrix(K, I, K, At, DXA, AtDXA);
+            prod_matrix(J, K, K, B, AtDXA, BAtDXA);
+            
+            for(int j=0; j<J; j++){
+                for(int k=0; k<K; k++){
+                    df_dB[j][k] += 2.0*BAtDXA[j][k] - 2.0*FtA[j][k];
+                }
+            }
+        }
+
+        // Using df_dA and df_dB, df_dU and df_dZ are calculated and used to update U and Z
+        conv_df_dZ(J, K, df_dB, B, df_dZ);
+        update_UZ(J, K, r, Z, df_dZ);
+
+        conv_df_dU(I, K, df_dA, A, df_dU);
+        update_UZ(I, K, r, U, df_dU);
+        
+        iter_count++;
+        d = f_p - f;
+
+        stop = 1;
+        for(int k=0; k<K; k++){
+            for(int i=0; i<I; i++){
+                if(fabs(df_dU[i][k]) > 0.0000000001){
+                    stop = 0;
+                }
+            }
+            for(int j=0; j<J; j++){
+                if(fabs(df_dZ[j][k]) > 0.0000000001){
+                    stop = 0;
+                }
+            }
+        }
+
+        if((fabs(d))<d_stop||f<f_stop){
+            stop = 1;
+        }
+    }
+    printf("Calcolo terminato valore f finale: %f. ", f);
+    for(int k=0; k<K; k++){
+        for(int i=0; i<I; i++){
+            alpha[i][k] = A[i][k];
+        }
+    }
+    for(int k=0; k<K; k++){
+        for(int j=0; j<J; j++){
+            beta[j][k] = B[j][k];
+        }
+    }
+}
+
+void slba_c(int I, int J, int T, double **F, double*** Fs, double** S_best, double*** alpha, double*** beta){
+    // Algo variables
+    double sum;
+    double parent_impurity;
+    double left_impurity, right_impurity;
+    double ppi;
+    double F_left[I][J], F_right[I][J];
+    int helpS[I], S[T][I], S_N[T][I];
+    int sumS=0, sumS_N=0; 
+
+    // S and S_Negative inizialization
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            S[t][i] = 1;
+            helpS[i] = 1;
+            S_N[t][i] = 0;
+        }   
+    }
+
+    parent_impurity = gini_impurity(I,J,helpS,F);
+    // LBA is executed
+    slba_NoC_execute(I, J, T, Fs, alpha, beta);
+    
+    // Eval S and S_Negative based on the LBA results
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            if(alpha[t][i][0] < alpha[t][i][1]){
+                S[t][i] = 0;
+                S_N[t][i] = 1;
+                sumS += S[t][i];
+                sumS_N += S_N[t][i];
+            } 
+        }
+    }
+
+    // Two local matrices F_left and F_right are evaluated in order to calculate the left and right impurity
+    for(int i=0; i<I; i++){
+        for(int j=0; j<J; j++){
+            F_left[i][j] = 0.0;
+            F_right[i][j] = 0.0;
+        }
+    }
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            for(int j=0; j<J; j++){
+                F_left[i][j] += (double)Fs[t][i][j] * S[t][i];
+                F_right[i][j] += (double)Fs[t][i][j] * S_N[t][i];
+            }
+        }
+    }
+
+    if(sumS == I*T || sumS_N == I*T){
+        ppi = 0;
+    } else {
+        left_impurity = gini_impurity_arr(I,J,helpS,F_left);
+        right_impurity = gini_impurity_arr(I,J,helpS,F_right);
+
+        // PPI eval
+        ppi = (parent_impurity - left_impurity - right_impurity)/(parent_impurity);
+    }
+
+    printf("PPI: %f\n", ppi);
+
+    S_best[0][0] = ppi;
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            S_best[t+1][i] = (double)S[t][i];
+        }
+    }
+}
+void slba_A_c(int I, int J, int T, double **F, double*** Fs, double** S_best, double** alpha, double*** beta){
+    // Algo variables
+    double sum;
+    double parent_impurity;
+    double left_impurity, right_impurity;
+    double ppi;
+    double F_left[I][J], F_right[I][J];
+    int S[I], S_N[I];
+    int sumS=0, sumS_N=0; 
+
+    // S and S_Negative inizialization
+    for(int i=0; i<I; i++){
+        S[i] = 1;
+        S_N[i] = 0;
+    }   
+    
+    parent_impurity = gini_impurity(I,J,S,F);
+    // LBA is executed
+    slba_A_execute(I, J, T, Fs, alpha, beta);
+    
+    // Eval S and S_Negative based on the LBA results
+    for(int i=0; i<I; i++){
+        if(alpha[i][0] < alpha[i][1]){
+            S[i] = 0;
+            S_N[i] = 1;
+            sumS += S[i];
+            sumS_N += S_N[i];
+        } 
+    }
+
+    // Two local matrices F_left and F_right are evaluated in order to calculate the left and right impurity
+    if(sumS == I || sumS_N == I){
+        ppi = 0;
+    } else {
+        left_impurity = gini_impurity(I,J,S,F);
+        right_impurity = gini_impurity(I,J,S_N,F);
+        // PPI eval
+        ppi = (parent_impurity - left_impurity - right_impurity)/(parent_impurity);
+    }
+
+    printf(" PPI: %f\n", ppi);
+
+    S_best[0][0] = ppi;
+    for(int i=0; i<I; i++){
+        S_best[1][i] = (double)S[i];
+    }
+}
+void slba_B_c(int I, int J, int T, double **F, double*** Fs, double** S_best, double*** alpha, double** beta){
+    // Algo variables
+    double sum;
+    double parent_impurity;
+    double left_impurity, right_impurity;
+    double ppi;
+    double F_left[I][J], F_right[I][J];
+    int helpS[I], S[T][I], S_N[T][I];
+    int sumS=0, sumS_N=0; 
+
+    // S and S_Negative inizialization
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            S[t][i] = 1;
+            helpS[i] = 1;
+            S_N[t][i] = 0;
+        }   
+    }
+
+    parent_impurity = gini_impurity(I,J,helpS,F);
+    // LBA is executed
+    slba_B_execute(I, J, T, Fs, alpha, beta);
+    
+    // Eval S and S_Negative based on the LBA results
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            if(alpha[t][i][0] < alpha[t][i][1]){
+                S[t][i] = 0;
+                S_N[t][i] = 1;
+                sumS += S[t][i];
+                sumS_N += S_N[t][i];
+            } 
+        }
+    }
+
+    // Two local matrices F_left and F_right are evaluated in order to calculate the left and right impurity
+    for(int i=0; i<I; i++){
+        for(int j=0; j<J; j++){
+            F_left[i][j] = 0.0;
+            F_right[i][j] = 0.0;
+        }
+    }
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            for(int j=0; j<J; j++){
+                F_left[i][j] += (double)Fs[t][i][j] * S[t][i];
+                F_right[i][j] += (double)Fs[t][i][j] * S_N[t][i];
+            }
+        }
+    }
+
+    if(sumS == I*T || sumS_N == I*T){
+        ppi = 0;
+    } else {
+        left_impurity = gini_impurity_arr(I,J,helpS,F_left);
+        right_impurity = gini_impurity_arr(I,J,helpS,F_right);
+
+        // PPI eval
+        ppi = (parent_impurity - left_impurity - right_impurity)/(parent_impurity);
+    }
+
+    printf("PPI: %f\n", ppi);
+
+    S_best[0][0] = ppi;
+    for(int t=0; t<T; t++){
+        for(int i=0; i<I; i++){
+            S_best[t+1][i] = (double)S[t][i];
+        }
+    }
+}
+void slba_AB_c(int I, int J, int T, double **F, double*** Fs, double** S_best, double** alpha, double** beta){
+    // Algo variables
+    double sum;
+    double parent_impurity;
+    double left_impurity, right_impurity;
+    double ppi;
+    double F_left[I][J], F_right[I][J];
+    int S[I], S_N[I];
+    int sumS=0, sumS_N=0; 
+
+    // S and S_Negative inizialization
+    for(int i=0; i<I; i++){
+        S[i] = 1;
+        S_N[i] = 0;
+    }   
+
+    parent_impurity = gini_impurity(I,J,S,F);
+
+    // LBA is executed
+    slba_AB_execute(I, J, T, Fs, alpha, beta);
+    
+    // Eval S and S_Negative based on the LBA results
+    for(int i=0; i<I; i++){
+        if(alpha[i][0] < alpha[i][1]){
+            S[i] = 0;
+            S_N[i] = 1;
+            sumS += S[i];
+            sumS_N += S_N[i];
+        } 
+    }
+
+    // Two local matrices F_left and F_right are evaluated in order to calculate the left and right impurity
+    if(sumS == I || sumS_N == I){
+        ppi = 0;
+    } else {
+        left_impurity = gini_impurity(I,J,S,F);
+        right_impurity = gini_impurity(I,J,S_N,F);
+        // PPI eval
+        ppi = (parent_impurity - left_impurity - right_impurity)/(parent_impurity);
+    }
+
+    printf(" PPI: %f\n", ppi);
+
+    S_best[0][0] = ppi;
+    for(int i=0; i<I; i++){
+        S_best[1][i] = (double)S[i];
+    }
+}

@@ -15,13 +15,6 @@ FLO = ct.c_double
 PFLO = ct.POINTER(FLO)
 PPFLO = ct.POINTER(PFLO)
 
-#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
-#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
-#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
-#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
-#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
-#!IN C SONO STATI CAMBIATI I FORMATI DA FLOAT A DOUBLE. CONTROLLARE CHE TUTTO FUNZIONI CORRETTAMENTE!!!!!!!!!!
-
 C_SCRIPT = ct.CDLL(str(Path(__file__).parent.absolute()) + '/LIB3C.so')
 
 gpi_c = getattr(C_SCRIPT,'gpi_c')
@@ -43,6 +36,7 @@ class Node:
                  distribution=None,
                  N=None,
                  labels=None,
+                 strat_labels=None,
                  *,value=None):
         
         self.gpi = gpi
@@ -60,6 +54,7 @@ class Node:
         self.LIFT_1 = LIFT_1
         self.LIFT_2 = LIFT_2
         self.GCR = GCR
+        self.strat_labels = strat_labels
 
     def _is_leaf_node(self):
         return self.value is not None
@@ -75,6 +70,7 @@ class Tree:
                  max_depth=100,
                  feats_viewed=1, 
                  model="twoStage",
+                 homogeneity=None,
                  FAST=False):
         
         col_config = {
@@ -93,10 +89,15 @@ class Tree:
         self.min_gpi = min_gpi
         self.min_ppi = min_ppi
         self.model_name = model
-        self.model = getattr(C_SCRIPT, model + "_c")
         self.compound_feats = compound_feats
         self.min_impurity = min_impurity
         self.FAST = FAST
+        self.homogeneity = homogeneity
+
+        if model == "slba" and homogeneity is not None:
+            self.model = getattr(C_SCRIPT, model + "_" + homogeneity + "_c")
+        else:
+            self.model = getattr(C_SCRIPT, model + "_c")
 
         self.results = pd.DataFrame(columns=col)
         self.targhet_dist = None
@@ -113,11 +114,12 @@ class Tree:
         self.targhet_dist = [np.unique(y), np.unique(y, return_counts=True)[1]/len(y)]
 
         if self.model_name == "slba" and x_s is None:
-            print("A Simultaneous Latent Budget Analysis was selected but no stratifyinng variable was given")
+            print("A Simultaneous Latent Budget Analysis was selected but no stratifying variable was given")
             return
         
         if self.model_name == "slba" and x_s is not None:
-            self._slba(X, y, x_s)
+            self.root = self._grow_tree(X, y, x_s)
+            return
 
         if self.model_name != "slba" and x_s is not None:
             print("A stratifying variable has been given but the Simultaneous Latent Budget Analysis model was not selcted.")
@@ -138,7 +140,7 @@ class Tree:
                 return np.array(arr)
 
     #Growing functions
-    def _grow_tree(self, X, y, depth=0, pos=1):
+    def _grow_tree(self, X, y, x_s=None, depth=0, pos=1):
         print("INIZIO CALCOLO NODO ALLA PROFONDITA':", depth, " ID:", pos) #TODO da cancellare
         # All columns with constant values are dropped
         nunique = X.nunique()
@@ -196,7 +198,11 @@ class Tree:
             gpi, gpi_index = zip(*sorted(zip(gpi, gpi_index), reverse=True))
 
         # Amongst the best predictors the one with the highest improvement (highest ppi) is chosen to perform the split
-        best_feature, best_treshold, best_ppi, best_idx, alpha, beta = self._find_best_predictor(X, n_labels, array_of_Fs, gpi_index, gpi)
+        best_feature, best_treshold, best_ppi, best_idx, alpha, beta = self._find_best_predictor(X, y, x_s, n_labels, array_of_Fs, gpi_index, gpi)
+
+        print("best feature", best_feature)
+        print("gpi", gpi[best_idx])
+        print("best ppi", best_ppi)
 
         # Check the stopping criteria
         if(gpi[best_idx]<self.min_gpi or best_ppi<self.min_ppi or best_ppi == 0):
@@ -209,17 +215,37 @@ class Tree:
             print("\n")
             return Node(position=pos, value=leaf_value, impurity=impurity, distribution=distribution, N=len(y), labels=np.unique(y), GCR=gcr)
         
-        print("best feature", best_feature)
-        print("gpi", gpi[best_idx])
-        print("best ppi", best_ppi)
-        print(best_treshold)
-        print("best treshold", np.unique(X[best_feature])[np.array(best_treshold)[:] > 0])
-        print("\n")
+        if x_s is not None and (self.homogeneity is None or self.homogeneity == "B"): #The homogeneity is None or B then A is composed by t matrices
+            local_treshold = []
+            for t in range(len(np.unique(x_s))):
+                local_treshold.append(np.unique(X[best_feature])[np.array(best_treshold[t])[:] > 0])
+            best_treshold = local_treshold
+            print("best treshold: ", best_treshold, "\n")
 
-        indexL, indexR = self._split(X[best_feature], best_treshold)
+            indexL, indexR = self._splitS(X[best_feature], x_s, best_treshold)
+        else: #The homogeneity is A or AB, or the model is not slba then A is a single matrix
+            print("best treshold: ", np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], "\n")
+
+            indexL, indexR = self._split(X[best_feature], best_treshold)
         
+        if x_s is not None and (self.homogeneity is None or self.homogeneity == "A"): #The homogeneity is None or A then B is composed by t matrices
+            lift1 = []
+            lift2 = []
+            for t in range(len(np.unique(x_s))):
+                lift1.append([x[0] for x in beta[t]]/distribution)
+                lift2.append([x[1] for x in beta[t]]/distribution)
+
+        if x_s is not None and self.homogeneity != "AB":
+            if self.homogeneity is None: #The homogeneity is None then both A and B are composed by t matrices
+                self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, best_treshold, gpi[best_idx], best_ppi, impurity, alpha, beta, lift1, lift2, [0 for _ in range(len(distribution))])
+            if self.homogeneity == "A": #The homogeneity is A then B is composed by t matrices
+                self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], gpi[best_idx], best_ppi, impurity, alpha, beta, lift1, lift2, [0 for _ in range(len(distribution))])
+            if self.homogeneity == "B": #The homogeneity is B then A is composed by t matrices
+                self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, best_treshold, gpi[best_idx], best_ppi, impurity, alpha, beta, [x[0] for x in beta]/distribution, [x[1] for x in beta]/distribution, [0 for _ in range(len(distribution))])
+        else: #The homogeneity is AB or the model is not slba then both A and B are single matrices
+            self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], gpi[best_idx], best_ppi, impurity, alpha, beta, [x[0] for x in beta]/distribution, [x[1] for x in beta]/distribution, [0 for _ in range(len(distribution))])
+            
         # Create the child nodes
-        self._update_results(pos, "Parent Node", None, best_feature, len(y), distribution, best_treshold, gpi[best_idx], best_ppi, impurity, alpha, beta, [x[0] for x in beta]/distribution, [x[1] for x in beta]/distribution, [0 for _ in range(len(distribution))])
         if(best_feature == compound_feature):
             X = X.loc[:, X.columns != feature_1]
             X = X.loc[:, X.columns != feature_2]
@@ -227,14 +253,45 @@ class Tree:
             right = self._grow_tree(X.loc[indexR, X.columns != best_feature], y[indexR], depth+1, 2*pos+1)
         else:
             X = X.loc[:, X.columns != compound_feature]
-            left = self._grow_tree(X.loc[indexL, X.columns != best_feature], y[indexL], depth+1, 2*pos)
-            right = self._grow_tree(X.loc[indexR, X.columns != best_feature], y[indexR], depth+1, 2*pos+1)
+            if x_s is not None:
+                left = self._grow_tree(X.loc[indexL, X.columns != best_feature], y[indexL], x_s[indexL], depth+1, 2*pos)
+                right = self._grow_tree(X.loc[indexR, X.columns != best_feature], y[indexR], x_s[indexR], depth+1, 2*pos+1)
+            else:
+                left = self._grow_tree(X.loc[indexL, X.columns != best_feature], y[indexL], None, depth+1, 2*pos)
+                right = self._grow_tree(X.loc[indexR, X.columns != best_feature], y[indexR], None, depth+1, 2*pos+1)
 
-        return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, 
-                    treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], 
-                    left=left, right=right, impurity=impurity, distribution=distribution, 
-                    N=len(y), labels=np.unique(y),
-                    LIFT_1=[x[0] for x in beta]/distribution, LIFT_2=[x[1] for x in beta]/distribution, GCR=None)
+        if x_s is not None:
+            if self.homogeneity is None: #The homogeneity is None then both A and B are composed by t matrices
+                return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, 
+                            treshold=best_treshold, 
+                            left=left, right=right, impurity=impurity, distribution=distribution, 
+                            N=len(y), labels=np.unique(y),
+                            LIFT_1=lift1, LIFT_2=lift2, GCR=None, strat_labels=np.unique(x_s))
+            if self.homogeneity == "A": #The homogeneity is A then only B is composed by t matrices
+                return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, 
+                            treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], 
+                            left=left, right=right, impurity=impurity, distribution=distribution, 
+                            N=len(y), labels=np.unique(y),
+                            LIFT_1=lift1, LIFT_2=lift2, GCR=None, strat_labels=np.unique(x_s))
+            if self.homogeneity == "B": #The homogeneity is B then only A is composed by t matrices
+                return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, 
+                            treshold=best_treshold, 
+                            left=left, right=right, impurity=impurity, distribution=distribution, 
+                            N=len(y), labels=np.unique(y),
+                            LIFT_1=[x[0] for x in beta]/distribution, LIFT_2=[x[1] for x in beta]/distribution, GCR=None, strat_labels=np.unique(x_s))
+            if self.homogeneity == "AB": #The homogeneity is AB then both A and B are single matrices
+                return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, 
+                        treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], 
+                        left=left, right=right, impurity=impurity, distribution=distribution, 
+                        N=len(y), labels=np.unique(y),
+                        LIFT_1=[x[0] for x in beta]/distribution, LIFT_2=[x[1] for x in beta]/distribution, GCR=None, strat_labels=np.unique(x_s))
+        else:
+            #The model is not slba
+            return Node(gpi=gpi[best_idx], ppi=best_ppi, position=pos, feature=best_feature, 
+                        treshold=np.unique(X[best_feature])[np.array(best_treshold)[:] > 0], 
+                        left=left, right=right, impurity=impurity, distribution=distribution, 
+                        N=len(y), labels=np.unique(y),
+                        LIFT_1=[x[0] for x in beta]/distribution, LIFT_2=[x[1] for x in beta]/distribution, GCR=None)
 
     def _split(self, X_col, best_treshold):
         L = np.unique(X_col)[np.array(best_treshold)[:] > 0]
@@ -242,7 +299,18 @@ class Tree:
         indexR =  np.isin(X_col, L) == False
         return indexL, indexR
 
-    def _find_best_predictor(self, X, n_labels, array_of_Fs, gpi_i, gpi):
+    def _splitS(self, X_col, x_s, best_treshold):
+        local_X = X_col.astype(str) + "_" + x_s.astype(str)
+        L = []
+        for i in range(len(np.unique(x_s))):
+            for j in range(len(best_treshold[i])):
+                L.append(str(best_treshold[i][j]) + "_" + str(np.unique(x_s)[i]))
+
+        indexL = np.isin(local_X, L)
+        indexR =  np.isin(local_X, L) == False
+        return indexL, indexR
+
+    def _find_best_predictor(self, X, y, x_s, n_labels, array_of_Fs, gpi_i, gpi):
         best_ppi = 0
         best_treshold = []
         best_alpha = []
@@ -256,55 +324,319 @@ class Tree:
             n_mod = len(np.unique(X[current_feature]))
 
             print("Current feature:", current_feature)
+            if x_s is not None:
+                n_mod_strat = len(np.unique(x_s))
+                N = len(X[current_feature])
 
-            # Current treshold will hold the best treshold for the current feature
-            PFLOTRESH = FLO * (n_mod+1)
-            current_treshold = PFLOTRESH()
-            # Array of pointers initialization
-            for k in range(n_mod + 1):
-                current_treshold[k] = 0.0
+                #Inizialization of F 
+                x_mods = sorted(set(X[current_feature]))
+                y_mods = sorted(set(y))
 
-            # Alpha and Beta will hold respectivelly the mixing parameters and the latent budgets. 
-            # If the model is not lba they remain unused
-            FLOARR = FLO * 2
-            PFLOARRA = PFLO * (n_mod)
-            PFLOARRB = PFLO * (n_labels)
+                # A temp dataframe is initialized
+                df = pd.DataFrame({
+                    'x': pd.Categorical(X[current_feature], categories=x_mods),
+                    'y': pd.Categorical(y, categories=y_mods),
+                    'x_s': x_s
+                })
 
-            alpha = PFLOARRA()
-            # Array of pointers initialization
-            for k in range(n_mod):
-                alpha[k] = FLOARR()
-                for j in range(2):
-                    alpha[k][j] = 0.0
+                PPFLOARRF = PPFLO * (n_mod_strat)
+                F = PPFLOARRF()
+                for idx, strat in enumerate(df['x_s'].unique()):
+                    sub_df = df[df['x_s'] == strat]
 
-            beta = PFLOARRB()
-            # Array of pointers initialization
-            for k in range(n_labels):
-                beta[k] = FLOARR()
-                for j in range(2):
-                    beta[k][j] = 0.0
+                    # The contingency table is evaluated
+                    F_local = pd.crosstab(sub_df['x'], sub_df['y'], dropna=False)
+                    I = len(F_local)
+                    J = len(F_local.iloc[0])
 
-            # This function doesn't return anything, it updates currente_treshold, alpha and beta instead
-            self.model(n_mod, n_labels, array_of_Fs[index], current_treshold, alpha, beta)
+                    FLOARRF = FLO * J
+                    PFLOARRF = PFLO * I
+                    F[idx] = PFLOARRF()
+                    # Array of pointers initialization
+                    for i in range(I):
+                        F[idx][i] = FLOARRF()
+                        for j in range(J):
+                            F[idx][i][j] = F_local.iloc[i].iloc[j]/N
 
-            if (current_treshold[0] > best_ppi):
-                best_idx = i
-                best_treshold = []
-                best_alpha = np.zeros((n_mod, 2))
-                best_beta = np.zeros((n_labels, 2))
-                best_ppi = current_treshold[0]
-                best_feature = current_feature
-                for k in range(1,n_mod+1):
-                    best_treshold.append(current_treshold[k]/best_ppi)
-                for k in range(2):
-                    for j in range(n_mod):
-                        best_alpha[j][k] = alpha[j][k]
-                    for j in range(n_labels):
-                        best_beta[j][k] = beta[j][k]
+                PPFLOARR = PPFLO * (n_mod_strat)
+                FLOARR = FLO * 2
+                PFLOARRA = PFLO * (n_mod)
+                PFLOARRB = PFLO * (n_labels)
+
+                if self.homogeneity is None:
+                    # Current treshold will hold the best treshold for the current feature
+                    PPFLOTRESH = PFLO * (n_mod_strat + 1)
+                    PFLOTRESH = FLO * (n_mod)
+                    PFLOTRESH1 = FLO * (1)
+
+                    current_treshold = PPFLOTRESH()
+                    current_treshold[0] = PFLOTRESH1()
+                    current_treshold[0][0] = 0.0
+                    for t in range(n_mod_strat):
+                        current_treshold[t+1] = PFLOTRESH()
+                        # Array of pointers initialization
+                        for k in range(n_mod):
+                            current_treshold[t+1][k] = 0.0
+
+                    # Initialization of A
+                    alpha = PPFLOARR()
+                    for t in range(n_mod_strat):
+                        alpha[t] = PFLOARRA()
+                        # Array of pointers initialization
+                        for k in range(n_mod):
+                            alpha[t][k] = FLOARR()
+                            for j in range(2):
+                                alpha[t][k][j] = 0.0
+
+                    # Initialization of B
+                    beta = PPFLOARR()
+                    for t in range(n_mod_strat):
+                        beta[t] = PFLOARRB()
+                        # Array of pointers initialization
+                        for k in range(n_labels):
+                            beta[t][k] = FLOARR()
+                            for j in range(2):
+                                beta[t][k][j] = 0.0
+
+                    self.model(n_mod, n_labels, n_mod_strat, array_of_Fs[index], F, current_treshold, alpha, beta)
+                    print("\n")
+
+                    if (current_treshold[0][0] > best_ppi):
+                        best_idx = index
+                        best_treshold = []
+                        best_alpha = []
+                        best_beta = []
+
+                        best_ppi = current_treshold[0][0]
+                        best_feature = current_feature
+                        for t in range(n_mod_strat):
+                            local_treshold = []
+                            local_alpha = np.zeros((n_mod, 2))
+                            local_beta = np.zeros((n_labels, 2))
+
+                            for k in range(n_mod):
+                                local_treshold.append(current_treshold[t+1][k])
+                            best_treshold.append(local_treshold)
+
+                            for k in range(2):
+                                for j in range(n_mod):
+                                    local_alpha[j][k] = alpha[t][j][k]
+                                for j in range(n_labels):
+                                    local_beta[j][k] = beta[t][j][k]
+                            best_alpha.append(local_alpha)
+                            best_beta.append(local_beta)
+
+                elif self.homogeneity == "A":
+                    # Current treshold will hold the best treshold for the current feature
+                    PPFLOTRESH = PFLO * (2)
+                    PFLOTRESH = FLO * (n_mod)
+                    PFLOTRESH1 = FLO * (1)
+
+                    current_treshold = PPFLOTRESH()
+                    current_treshold[0] = PFLOTRESH1()
+                    current_treshold[0][0] = 0.0
+                    current_treshold[1] = PFLOTRESH()
+                    for k in range(n_mod):
+                        current_treshold[1][k] = 0.0
+
+                    # Initialization of A
+                    alpha = PFLOARRA()
+                    for k in range(n_mod):
+                        alpha[k] = FLOARR()
+                        for j in range(2):
+                            alpha[k][j] = 0.0
+
+                    # Initialization of B
+                    beta = PPFLOARR()
+                    for t in range(n_mod_strat):
+                        beta[t] = PFLOARRB()
+                        # Array of pointers initialization
+                        for k in range(n_labels):
+                            beta[t][k] = FLOARR()
+                            for j in range(2):
+                                beta[t][k][j] = 0.0
+
+                    self.model(n_mod, n_labels, n_mod_strat, array_of_Fs[index], F, current_treshold, alpha, beta)
+                    print("\n")
+
+                    if (current_treshold[0][0] > best_ppi):
+                        best_idx = index
+                        best_treshold = []
+                        best_alpha = np.zeros((n_mod, 2))
+                        best_beta = []
+
+                        best_ppi = current_treshold[0][0]
+                        best_feature = current_feature
+
+                        for j in range(n_mod):
+                            best_alpha[j][0] = alpha[j][0]
+                            best_alpha[j][1] = alpha[j][1]
+                            best_treshold.append(current_treshold[1][j])
+
+                        for t in range(n_mod_strat):
+                            local_beta = np.zeros((n_labels, 2))
+                            for k in range(2):
+                                for j in range(n_labels):
+                                    local_beta[j][k] = beta[t][j][k]
+                            best_beta.append(local_beta)
+
+                elif self.homogeneity == "B":
+                    # Current treshold will hold the best treshold for the current feature
+                    PPFLOTRESH = PFLO * (n_mod_strat + 1)
+                    PFLOTRESH = FLO * (n_mod)
+                    PFLOTRESH1 = FLO * (1)
+
+                    current_treshold = PPFLOTRESH()
+                    current_treshold[0] = PFLOTRESH1()
+                    current_treshold[0][0] = 0.0
+                    for t in range(n_mod_strat):
+                        current_treshold[t+1] = PFLOTRESH()
+                        # Array of pointers initialization
+                        for k in range(n_mod):
+                            current_treshold[t+1][k] = 0.0
+
+                    # Initialization of B
+                    beta = PFLOARRB()
+                    for k in range(n_labels):
+                        beta[k] = FLOARR()
+                        for j in range(2):
+                            beta[k][j] = 0.0
+
+                    # Initialization of A
+                    alpha = PPFLOARR()
+                    for t in range(n_mod_strat):
+                        alpha[t] = PFLOARRA()
+                        # Array of pointers initialization
+                        for k in range(n_mod):
+                            alpha[t][k] = FLOARR()
+                            for j in range(2):
+                                alpha[t][k][j] = 0.0
+
+                    self.model(n_mod, n_labels, n_mod_strat, array_of_Fs[index], F, current_treshold, alpha, beta)
+                    print("\n")
+
+                    if (current_treshold[0][0] > best_ppi):
+                        best_idx = index
+                        best_treshold = []
+                        best_alpha = []
+                        best_beta = np.zeros((n_labels, 2))
+
+                        best_ppi = current_treshold[0][0]
+                        best_feature = current_feature
+                        for j in range(n_labels):
+                            best_beta[j][0] = beta[j][0]
+                            best_beta[j][1] = beta[j][1]
+
+                        for t in range(n_mod_strat):
+                            local_treshold = []
+                            local_alpha = np.zeros((n_mod, 2))
+                            local_beta = np.zeros((n_labels, 2))
+
+                            for k in range(n_mod):
+                                local_treshold.append(current_treshold[t+1][k])
+                            best_treshold.append(local_treshold)
+
+                            for k in range(2):
+                                for j in range(n_mod):
+                                    local_alpha[j][k] = alpha[t][j][k]
+                            best_alpha.append(local_alpha)    
+
+                elif self.homogeneity == "AB":      
+                    # Current treshold will hold the best treshold for the current feature
+                    PPFLOTRESH = PFLO * (2)
+                    PFLOTRESH = FLO * (n_mod)
+                    PFLOTRESH1 = FLO * (1)
+
+                    current_treshold = PPFLOTRESH()
+                    current_treshold[0] = PFLOTRESH1()
+                    current_treshold[0][0] = 0.0
+                    current_treshold[1] = PFLOTRESH()
+                    for k in range(n_mod):
+                        current_treshold[1][k] = 0.0
+
+                    # Initialization of A
+                    alpha = PFLOARRA()
+                    for k in range(n_mod):
+                        alpha[k] = FLOARR()
+                        for j in range(2):
+                            alpha[k][j] = 0.0
+
+                    # Initialization of B
+                    beta = PFLOARRB()
+                    for k in range(n_labels):
+                        beta[k] = FLOARR()
+                        for j in range(2):
+                            beta[k][j] = 0.0
+
+                    self.model(n_mod, n_labels, n_mod_strat, array_of_Fs[index], F, current_treshold, alpha, beta)
+                    print("\n")
+
+                    if (current_treshold[0][0] > best_ppi):
+                        best_idx = index
+                        best_treshold = []
+                        best_alpha = np.zeros((n_mod, 2))
+                        best_beta = np.zeros((n_labels, 2))
+
+                        best_ppi = current_treshold[0][0]
+                        best_feature = current_feature
+
+                        for j in range(n_mod):
+                            best_alpha[j][0] = alpha[j][0]
+                            best_alpha[j][1] = alpha[j][1]
+                            best_treshold.append(current_treshold[1][j])
+
+                        for i in range(n_labels):
+                            best_beta[i][0] = beta[i][0]
+                            best_beta[i][1] = beta[i][1]
+
+            else:
+                # Current treshold will hold the best treshold for the current feature
+                PFLOTRESH = FLO * (n_mod+1)
+                current_treshold = PFLOTRESH()
+                # Array of pointers initialization
+                for k in range(n_mod + 1):
+                    current_treshold[k] = 0.0
+
+                # Alpha and Beta will hold respectivelly the mixing parameters and the latent budgets. 
+                # If the model is not lba they remain unused
+                FLOARR = FLO * 2
+                PFLOARRA = PFLO * (n_mod)
+                PFLOARRB = PFLO * (n_labels)
+
+                alpha = PFLOARRA()
+                # Array of pointers initialization
+                for k in range(n_mod):
+                    alpha[k] = FLOARR()
+                    for j in range(2):
+                        alpha[k][j] = 0.0
+
+                beta = PFLOARRB()
+                # Array of pointers initialization
+                for k in range(n_labels):
+                    beta[k] = FLOARR()
+                    for j in range(2):
+                        beta[k][j] = 0.0
+                
+                self.model(n_mod, n_labels, array_of_Fs[index], current_treshold, alpha, beta)
+
+                if (current_treshold[0] > best_ppi):
+                    best_idx = i
+                    best_treshold = []
+                    best_alpha = np.zeros((n_mod, 2))
+                    best_beta = np.zeros((n_labels, 2))
+                    best_ppi = current_treshold[0]
+                    best_feature = current_feature
+                    for k in range(1,n_mod+1):
+                        best_treshold.append(current_treshold[k]/best_ppi)
+                    for k in range(2):
+                        for j in range(n_mod):
+                            best_alpha[j][k] = alpha[j][k]
+                        for j in range(n_labels):
+                            best_beta[j][k] = beta[j][k]
             
             if(self.FAST and i<len(gpi)-1 and best_ppi>gpi[i+1]):
                 return best_feature, best_treshold, best_ppi, best_idx, best_alpha, best_beta
-
+            
         return best_feature, best_treshold, best_ppi, best_idx, best_alpha, best_beta
     
     def _pruning(self, node):
@@ -329,15 +661,16 @@ class Tree:
                 self.results.loc[self.results["id"] == node.position,"Node Type"] = "Leaf Node"
                 self.results.loc[self.results["id"] == node.position,"Value"] = node.value
                 self.results.loc[self.results["id"] == node.position,"Splitting Variable"] = None
-                self.results.loc[self.results["id"] == node.position,"Alpha"] = None
-                self.results.loc[self.results["id"] == node.position,"Beta"] = None
-                self.results.loc[self.results["id"] == node.position,"LIFT_K1"] = None
-                self.results.loc[self.results["id"] == node.position,"LIFT_K2"] = None
                 self.results.loc[self.results["id"] == node.position,"Treshold"] = None
                 self.results.loc[self.results["id"] == node.position,"Gpi"] = None
                 self.results.loc[self.results["id"] == node.position,"Ppi"] = None
 
-                self.results.at[self.results.index[self.results["id"] == node.position][0], "GCR"] = node.GCR
+                if self.model_name == "lba":
+                    self.results.at[self.results.index[self.results["id"] == node.position][0], "GCR"] = node.GCR
+                    self.results.loc[self.results["id"] == node.position,"Alpha"] = None
+                    self.results.loc[self.results["id"] == node.position,"Beta"] = None
+                    self.results.loc[self.results["id"] == node.position,"LIFT_K1"] = None
+                    self.results.loc[self.results["id"] == node.position,"LIFT_K2"] = None
 
                 self.results = self.results[self.results["id"] != node.left.position]
                 self.results = self.results[self.results["id"] != node.right.position]
@@ -346,12 +679,6 @@ class Tree:
                 node.right = None
 
         return node
-
-    def _slba(self, X, y, x_s):
-        #UNCONSTRAINED EXECUTION
-
-        return
-
 
     #Update functions  
     def _get_gcr(self, distribution, labels):
@@ -390,7 +717,7 @@ class Tree:
             self.r_c = r_c
     
     def _update_results(self, id, type, value, feature, n, distribution, treshold, gpi, ppi, impurity, a, b, lift1, lift2, gcr):
-        if(self.model_name == "lba"):
+        if(self.model_name == "lba" or self.model_name == "slba"):
             self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, a, b, lift1, lift2, gcr, treshold, impurity, gpi, ppi]
         else:
             self.results.loc[len(self.results)] = [id, type, value, feature, n, distribution, treshold, impurity, gpi, ppi]
@@ -486,9 +813,10 @@ class Tree:
             i +=1 
 
     def _recurse(self, node):
+        print("pos: ", node.position)
         dist = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.distribution.tolist()))
         if node.value is not None:
-            if(self.model_name == "lba"):
+            if(self.model_name == "lba" or self.model_name == "slba"):
                 gcr = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.GCR))
             else:
                 gcr = None
@@ -504,13 +832,33 @@ class Tree:
                     "gcr" : gcr,
                     }
         
-        if(self.model_name == "lba"):
+        if(self.model_name == "lba" or (self.model_name == "slba" and (self.homogeneity == "B" or self.homogeneity == "AB"))):
             lift1 = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.LIFT_1.tolist()))
             lift2 = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.LIFT_2.tolist()))
+        elif(self.model_name == "slba" and (self.homogeneity == "A" or self.homogeneity is None)):
+            lift1 = "\n".join(
+                    f"{strat_label}: (" + 
+                    ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels, lift_vals)) + 
+                    ")" 
+                    for strat_label, lift_vals in zip(node.strat_labels, node.LIFT_1)
+                )
+            lift2 = "\n".join(
+                    f"{strat_label}: (" + 
+                    ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels, lift_vals)) + 
+                    ")" 
+                    for strat_label, lift_vals in zip(node.strat_labels, node.LIFT_2)
+                )
         else:
             lift1 = None
             lift2 = None
 
+        if(self.model_name == "slba" and (self.homogeneity == "A" or self.homogeneity == "AB")) or (self.model_name != "slba"):
+            treshold = ', '.join(str(x) for x in node.treshold)
+        else:
+            treshold =  ", ".join(
+                        f"{label}:[{', '.join(str(x) for x in values)}]"
+                        for label, values in zip(node.strat_labels, node.treshold)
+                        )
         return {
             "isLeaf": 0,
             "feature": node.feature,
@@ -518,7 +866,7 @@ class Tree:
             "distArray": node.distribution.tolist(),
             "lift1" : lift1,
             "lift2" : lift2,
-            "treshold" : ', '.join(str(x) for x in node.treshold),
+            "treshold" : treshold,
             "position": node.position,
             "gpi" : node.gpi,
             "ppi" : node.ppi,
@@ -531,7 +879,8 @@ class Tree:
             ]
         }
         
-    def plot_html(self, output_file = "tree_visualization.html", color_palet = ["#FF6384", "#36A2EB", "#FFCE56", "#4CAF50", "#9966FF", "#795548", "#D81B60", "#00ACC1", "#8D6E63", "#FF9800"]):
+    def plot_html(self, output_file = "tree_visualization.html", title="Decision Tree Visualization",
+                  color_palet = ["#FF6384", "#36A2EB", "#FFCE56", "#4CAF50", "#9966FF", "#795548", "#D81B60", "#00ACC1", "#8D6E63", "#FF9800"]):
         tree_JSON = json.dumps(self._recurse(self.root), indent=4)
         dataPlot = {
             "l_c": self.l_c,
@@ -562,7 +911,7 @@ class Tree:
             </style> 
         </head> 
         <body> 
-            <h1>Decision Tree Visualization</h1> 
+            <h1>""" + title + f"""</h1> 
             <div class="tree-container" id="tree"></div> 
 
             <div id="tooltip" class="tooltip"></div>
@@ -683,7 +1032,7 @@ class Tree:
                     tooltip = document.getElementById('tooltip')
 
                     if(node.isLeaf == 1){{
-                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution +  "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nGCR: [" + node.gcr  + "]\\nPrediction: "+ node.value;
+                        tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels + "\\nClass distribution: [" + node.distribution +  "]\\nGCR: [" + node.gcr + "]\\nImpurty: " + node.impurity.toFixed(3) + "\\nPrediction: "+ node.value;
                     }} else {{
                         if(node.lift1 && node.lift2) {{
                             tooltip.innerText = "Id: " + node.position + "\\nN: " + node.labels +  "\\nClass distribution: [" + node.distribution + "]\\nLIFT left: [" + node.lift1 + "]\\nLIFT right: [" + node.lift2 + "]\\nFeature: " + node.feature + "\\nThreshold left: [" + node.treshold + "]\\nGpi: " + node.gpi.toFixed(3) + "\\nPpi: " + node.ppi.toFixed(3)  + "\\nImpurty: " + node.impurity.toFixed(3);
@@ -799,22 +1148,22 @@ class Categorizer:
 
         if(self.k):
             self.base_model(len(x), self.k, x_flo_c, x_cat_1)
-            return x_cat_1
+            return list(x_cat_1)
 
         x_cat_2 = LABINT()
         if(self.k_method == "elbow"):
             k_opt = self.model(len(x), self.max_classes, self.min_classes, self.min_clustersize, x_flo_c, x_cat_1, x_cat_2)
 
             if (k_opt % 2 == 0):
-                return x_cat_2
+                return list(x_cat_2)
             else:
-                return x_cat_1
+                return list(x_cat_1)
         
         if(self.k_method == "silhouette"):
             self.model.restype = FLO
             k_opt = self.model(len(x), self.max_classes, self.min_classes, self.min_clustersize, x_flo_c, x_cat_1, x_cat_2)
             frac = math.modf(k_opt)
             if(frac == 0):
-                return x_cat_1
+                return list(x_cat_1)
             else:
-                return x_cat_2
+                return list(x_cat_2)
