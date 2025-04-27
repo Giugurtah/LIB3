@@ -813,7 +813,6 @@ class Tree:
             i +=1 
 
     def _recurse(self, node):
-        print("pos: ", node.position)
         dist = ", ".join(f"{label}={self._custom_round(prob, 2)}" for label, prob in zip(node.labels.tolist(), node.distribution.tolist()))
         if node.value is not None:
             if(self.model_name == "lba" or self.model_name == "slba"):
@@ -880,13 +879,14 @@ class Tree:
         }
         
     def plot_html(self, output_file = "tree_visualization.html", title="Decision Tree Visualization",
-                  color_palet = ["#FF6384", "#36A2EB", "#FFCE56", "#4CAF50", "#9966FF", "#795548", "#D81B60", "#00ACC1", "#8D6E63", "#FF9800"]):
+                  color_palet = ["#FF6384", "#36A2EB", "#FFCE56", "#4CAF50", "#9966FF", "#D81B60", "#00ACC1", "#8D6E63", "#FF9800"]):
         tree_JSON = json.dumps(self._recurse(self.root), indent=4)
         dataPlot = {
             "l_c": self.l_c,
             "r_c": self.r_c,
             "depth": self.depth,
-            "colors": color_palet
+            "colors": color_palet,
+            "labels": self.root.labels.tolist()
         }
         plot_JSON = json.dumps(dataPlot, indent=4)
         html_content = f""" 
@@ -908,6 +908,9 @@ class Tree:
                 .t_l {{ transform: translate(35px, -5px)}}
                 .t_r {{ transform: translateX(-100%) translate(-8px, -5px)}}
                 .leaf_value{{ display: inline-block; font-weight: bolder; position: absolute; line-height: 24px; transform: translate(6px, 30px)}}
+                #legend {{ display: flex; flex-wrap: wrap; gap: 8px; position: absolute; bottom: 3%; width: 100%; justify-content: center; font-family: sans-serif}}
+                .legend-item {{ display: flex; align-items: center; gap: 6px; margin-right: 12px }}
+                .color-box {{ width: 16px; height: 16px; border: 1px solid #000; box-sizing: border-box}}
             </style> 
         </head> 
         <body> 
@@ -978,7 +981,7 @@ class Tree:
                     rbranchElement.style.height = h + "%"
                     rbranchElement.style.width = d/2 + "%"
 
-                    // Creare un elemento canvas per il grafico a torta
+                    // Pie graph creation
                     let canvas = document.createElement("canvas");
                     canvas.width = 36;
                     canvas.height = 36;
@@ -1001,7 +1004,28 @@ class Tree:
                     return
                 }}
 
-                // Funzione per disegnare un grafico a torta con il canvas
+                // Legend creation
+                const legendContainer = document.createElement('div');
+                legendContainer.id = 'legend';
+
+                for (let i = 0; i < plotData.labels.length; i++) {{
+                const item = document.createElement('div');
+                item.className = 'legend-item';
+
+                const colorBox = document.createElement('div');
+                colorBox.className = 'color-box';
+                colorBox.style.backgroundColor = plotData.colors[i];
+
+                const label = document.createElement('span');
+                label.textContent = plotData.labels[i];
+
+                item.appendChild(colorBox);
+                item.appendChild(label);
+                legendContainer.appendChild(item);
+                }}
+                document.body.appendChild(legendContainer);
+
+                // Function used to draw the pie graph
                 function drawPieChart(canvas, distArray, labArray) {{
                     let ctx = canvas.getContext("2d");
                     let total = distArray.reduce((sum, val) => sum + val, 0);
@@ -1014,13 +1038,17 @@ class Tree:
                         ctx.moveTo(18, 18);  // Centro del cerchio
                         ctx.arc(18, 18, 16, startAngle, startAngle + sliceAngle);
                         ctx.closePath();
-                        ctx.fillStyle = plotData.colors[labArray[index] % plotData.colors.length]; // Usa i colori in loop
+                        plotData.labels.forEach((valueLab, indexLab) => {{
+                            if(valueLab == labArray[index]) {{
+                                ctx.fillStyle = plotData.colors[indexLab % plotData.colors.length];
+                            }}
+                        }})
                         ctx.fill();
 
                         startAngle += sliceAngle;
                     }});
 
-                    // Disegna il bordo del cerchio
+                    // Border of the canvas
                     ctx.beginPath();
                     ctx.arc(18, 18, 17, 0, 2 * Math.PI);
                     ctx.strokeStyle = "blue";
